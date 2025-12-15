@@ -1,6 +1,6 @@
 # NetBird Self-Hosted with PocketID
 
-This guide walks you through deploying NetBird self-hosted with [PocketID](https://github.com/stonith404/pocket-id) as the identity provider and NGINX Proxy Manager for SSL/reverse proxy.
+This guide walks you through deploying NetBird self-hosted with [PocketID](https://github.com/pocket-id/pocket-id) as the identity provider and NGINX Proxy Manager for SSL/reverse proxy.
 
 ## Required DNS Records
 
@@ -532,5 +532,5 @@ Understanding how the configuration files relate to each other:
 ## References
 
 - [NetBird Documentation](https://docs.netbird.io/)
-- [PocketID Documentation](https://github.com/stonith404/pocket-id)
+- [PocketID Documentation](https://github.com/pocket-id/pocket-id)
 - [NGINX Proxy Manager](https://nginxproxymanager.com/)
