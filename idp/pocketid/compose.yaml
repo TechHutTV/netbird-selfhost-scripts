@@ -1,0 +1,51 @@
+# =============================================================================
+# PocketID Identity Provider - Docker Compose Configuration
+# =============================================================================
+# This file is included when deploying PocketID as part of the NetBird stack.
+# For existing PocketID instances, this file is not needed.
+#
+# PocketID is lightweight and requires minimal resources.
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # PocketID - OIDC Identity Provider
+  # ---------------------------------------------------------------------------
+  pocketid:
+    image: stonith404/pocket-id:latest
+    container_name: pocketid
+    restart: unless-stopped
+    networks:
+      - netbird
+    ports:
+      - "3000:80"  # HTTP (proxy through NPM for HTTPS)
+    volumes:
+      - pocketid_data:/app/backend/data
+    environment:
+      - PUBLIC_APP_URL=${POCKETID_URL:-https://auth.example.com}
+      - TRUST_PROXY=true
+      - MAXMIND_LICENSE_KEY=${MAXMIND_LICENSE_KEY:-}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "2"
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  pocketid_data:
+
+# =============================================================================
+# Networks (uses the same network as NetBird)
+# =============================================================================
+networks:
+  netbird:
+    external: true

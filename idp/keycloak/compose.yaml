@@ -1,0 +1,87 @@
+# =============================================================================
+# Keycloak Identity Provider - Docker Compose Configuration
+# =============================================================================
+# This file is included when deploying Keycloak as part of the NetBird stack.
+# For existing Keycloak instances, this file is not needed.
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Keycloak - Identity Provider
+  # ---------------------------------------------------------------------------
+  keycloak:
+    image: quay.io/keycloak/keycloak:latest
+    container_name: keycloak
+    restart: unless-stopped
+    networks:
+      - netbird
+    ports:
+      - "8080:8080"  # HTTP (proxy through NPM for HTTPS)
+    command:
+      - start
+      - --hostname=${KEYCLOAK_DOMAIN:-keycloak.example.com}
+      - --hostname-strict=false
+      - --proxy-headers=xforwarded
+      - --http-enabled=true
+    environment:
+      - KC_DB=postgres
+      - KC_DB_URL=jdbc:postgresql://keycloak-db:5432/keycloak
+      - KC_DB_USERNAME=keycloak
+      - KC_DB_PASSWORD=${KEYCLOAK_DB_PASSWORD:-keycloak-db-password}
+      - KEYCLOAK_ADMIN=${KEYCLOAK_ADMIN_USER:-admin}
+      - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      - KC_HEALTH_ENABLED=true
+      - KC_METRICS_ENABLED=true
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '200 OK'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "2"
+
+  # ---------------------------------------------------------------------------
+  # Keycloak PostgreSQL Database
+  # ---------------------------------------------------------------------------
+  keycloak-db:
+    image: postgres:16-alpine
+    container_name: keycloak-db
+    restart: unless-stopped
+    networks:
+      - netbird
+    environment:
+      - POSTGRES_USER=keycloak
+      - POSTGRES_PASSWORD=${KEYCLOAK_DB_PASSWORD:-keycloak-db-password}
+      - POSTGRES_DB=keycloak
+    volumes:
+      - keycloak_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "2"
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  keycloak_db_data:
+
+# =============================================================================
+# Networks (uses the same network as NetBird)
+# =============================================================================
+networks:
+  netbird:
+    external: true

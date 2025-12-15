@@ -1,13 +1,24 @@
 #!/bin/bash
 
 # =============================================================================
-# NetBird Self-Hosted with PocketID - Interactive Setup Script
+# NetBird Self-Hosted - Interactive Setup Script
 # =============================================================================
 # This script walks you through the complete setup process for deploying
-# NetBird with PocketID as the identity provider.
+# NetBird with your choice of identity provider.
+#
+# Supported IDPs:
+#   - Zitadel     (Full-featured, device auth, recommended)
+#   - Authentik   (Flexible, security-focused)
+#   - Keycloak    (Popular enterprise IAM)
+#   - PocketID    (Lightweight, simple)
 # =============================================================================
 
 set -e
+
+# -----------------------------------------------------------------------------
+# Script Directory
+# -----------------------------------------------------------------------------
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # -----------------------------------------------------------------------------
 # Color Configuration
@@ -27,41 +38,41 @@ NC='\033[0m' # No Color
 
 print_banner() {
     echo -e "${CYAN}"
-    echo "╔═══════════════════════════════════════════════════════════════════════════╗"
-    echo "║                                                                           ║"
-    echo "║       ${BOLD}NetBird Self-Hosted with PocketID${NC}${CYAN}                                 ║"
-    echo "║       Interactive Setup Script                                            ║"
-    echo "║                                                                           ║"
-    echo "╚═══════════════════════════════════════════════════════════════════════════╝"
+    echo "==============================================================================="
+    echo "                                                                               "
+    echo "       ${BOLD}NetBird Self-Hosted${NC}${CYAN}                                                  "
+    echo "       Interactive Setup Script                                                "
+    echo "                                                                               "
+    echo "==============================================================================="
     echo -e "${NC}"
 }
 
 print_section() {
     echo ""
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${BLUE}-------------------------------------------------------------------------------${NC}"
     echo -e "${BOLD}${BLUE}  $1${NC}"
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${BLUE}-------------------------------------------------------------------------------${NC}"
     echo ""
 }
 
 print_step() {
-    echo -e "${GREEN}▶${NC} $1"
+    echo -e "${GREEN}>>>${NC} $1"
 }
 
 print_info() {
-    echo -e "${CYAN}ℹ${NC} $1"
+    echo -e "${CYAN}[i]${NC} $1"
 }
 
 print_warning() {
-    echo -e "${YELLOW}⚠${NC} $1"
+    echo -e "${YELLOW}[!]${NC} $1"
 }
 
 print_error() {
-    echo -e "${RED}✖${NC} $1"
+    echo -e "${RED}[x]${NC} $1"
 }
 
 print_success() {
-    echo -e "${GREEN}✔${NC} $1"
+    echo -e "${GREEN}[+]${NC} $1"
 }
 
 prompt_yes_no() {
@@ -144,7 +155,6 @@ check_docker_compose() {
 validate_domain() {
     local domain="$1"
 
-    # Basic domain validation
     if [[ -z "$domain" ]]; then
         return 1
     fi
@@ -154,7 +164,6 @@ validate_domain() {
         return 0
     fi
 
-    # Check if domain resolves (optional - just a warning)
     if command -v dig &> /dev/null; then
         if ! dig +short "$domain" &> /dev/null; then
             print_warning "Could not resolve $domain - make sure DNS is configured"
@@ -163,6 +172,12 @@ validate_domain() {
 
     return 0
 }
+
+# -----------------------------------------------------------------------------
+# Source IDP Common Functions
+# -----------------------------------------------------------------------------
+
+source "${SCRIPT_DIR}/idp/common.sh"
 
 # -----------------------------------------------------------------------------
 # Prerequisites Check
@@ -178,7 +193,6 @@ check_prerequisites() {
     check_command "curl" || all_good=false
     check_command "openssl" || all_good=false
 
-    # jq is optional but helpful
     if ! check_command "jq"; then
         print_warning "jq is optional but recommended for JSON validation"
     fi
@@ -198,14 +212,33 @@ check_prerequisites() {
 }
 
 # -----------------------------------------------------------------------------
+# IDP Selection
+# -----------------------------------------------------------------------------
+
+select_identity_provider() {
+    print_section "Identity Provider Selection"
+
+    print_info "NetBird requires an OpenID Connect (OIDC) identity provider."
+    print_info "Choose from the following self-hosted options:"
+
+    select_idp  # From common.sh
+
+    # Source IDP-specific configuration
+    source "${SCRIPT_DIR}/idp/${SELECTED_IDP}/config.sh"
+
+    # Ask about existing vs deploy
+    select_idp_mode "$SELECTED_IDP"
+}
+
+# -----------------------------------------------------------------------------
 # Configuration Collection
 # -----------------------------------------------------------------------------
 
 collect_configuration() {
-    print_section "Configuration"
+    print_section "Domain Configuration"
 
     # NetBird Domain
-    echo -e "${BOLD}Domain Configuration${NC}"
+    echo -e "${BOLD}NetBird Domain${NC}"
     echo ""
     print_info "NetBird requires a domain name for secure HTTPS connections."
     print_info "Example: netbird.yourdomain.com"
@@ -221,60 +254,23 @@ collect_configuration() {
 
     echo ""
 
-    # PocketID Configuration
-    echo -e "${BOLD}PocketID Identity Provider${NC}"
-    echo ""
-
-    if prompt_yes_no "Do you have an existing PocketID instance?" "n"; then
-        EXISTING_POCKETID=true
-        print_info "You'll configure NetBird to use your existing PocketID instance."
-        echo ""
-
-        prompt_input "Enter your PocketID URL (e.g., https://auth.yourdomain.com)" "" "POCKETID_URL"
-
-        # Remove trailing slash if present
-        POCKETID_URL="${POCKETID_URL%/}"
-
-        echo ""
-        print_info "You'll need to create an OIDC client and API key in PocketID."
-        print_info "See the README for detailed instructions."
-        echo ""
-
-        prompt_input "Enter your PocketID OIDC Client ID" "" "POCKETID_CLIENT_ID"
-        prompt_secret "Enter your PocketID API Token" "POCKETID_API_TOKEN"
-
+    # Collect IDP-specific configuration
+    if [[ "$IDP_MODE" == "existing" ]]; then
+        "collect_${SELECTED_IDP}_existing_config"
     else
-        EXISTING_POCKETID=false
-        print_info "PocketID will be deployed as part of this stack."
-        echo ""
-
-        while true; do
-            prompt_input "Enter domain for PocketID (e.g., auth.yourdomain.com)" "" "POCKETID_DOMAIN"
-            if validate_domain "$POCKETID_DOMAIN"; then
-                break
-            fi
-            print_error "Please enter a valid domain name"
-        done
-
-        POCKETID_URL="https://$POCKETID_DOMAIN"
-        POCKETID_CLIENT_ID=""
-        POCKETID_API_TOKEN=""
-
-        print_info "You'll configure PocketID after the initial deployment."
+        "collect_${SELECTED_IDP}_deploy_config"
     fi
 
     echo ""
 
     # NGINX Proxy Manager Configuration
-    echo -e "${BOLD}Reverse Proxy Configuration${NC}"
-    echo ""
+    print_section "Reverse Proxy Configuration"
 
     if prompt_yes_no "Do you have an existing NGINX Proxy Manager instance?" "n"; then
         EXISTING_NPM=true
-        print_info "You'll configure your existing NGINX Proxy Manager to proxy NetBird."
-        echo ""
-        print_warning "Make sure your NPM can reach the Docker network for this stack."
         DEPLOY_NPM=false
+        print_info "You'll configure your existing NGINX Proxy Manager to proxy NetBird."
+        print_warning "Make sure your NPM can reach the Docker network for this stack."
     else
         EXISTING_NPM=false
         if prompt_yes_no "Deploy NGINX Proxy Manager as part of this stack?" "y"; then
@@ -287,30 +283,34 @@ collect_configuration() {
         fi
     fi
 
-    echo ""
+    # Display Summary
+    display_configuration_summary
+}
 
-    # Summary
+display_configuration_summary() {
     print_section "Configuration Summary"
 
-    echo -e "  ${BOLD}NetBird Domain:${NC}    $NETBIRD_DOMAIN"
-    echo -e "  ${BOLD}PocketID URL:${NC}      $POCKETID_URL"
-    if [[ "$EXISTING_POCKETID" == "true" ]]; then
-        echo -e "  ${BOLD}PocketID:${NC}          Using existing instance"
-        echo -e "  ${BOLD}Client ID:${NC}         $POCKETID_CLIENT_ID"
-        echo -e "  ${BOLD}API Token:${NC}         ********"
+    echo -e "  ${BOLD}NetBird Domain:${NC}      $NETBIRD_DOMAIN"
+    echo -e "  ${BOLD}Identity Provider:${NC}   ${IDP_NAMES[$SELECTED_IDP]}"
+    echo -e "  ${BOLD}IDP URL:${NC}             ${IDP_URL}"
+
+    if [[ "$IDP_MODE" == "deploy" ]]; then
+        echo -e "  ${BOLD}IDP Deployment:${NC}      Will be deployed with stack"
     else
-        echo -e "  ${BOLD}PocketID:${NC}          Will be deployed"
+        echo -e "  ${BOLD}IDP Deployment:${NC}      Using existing instance"
     fi
+
     if [[ "$DEPLOY_NPM" == "true" ]]; then
-        echo -e "  ${BOLD}NGINX Proxy Mgr:${NC}   Will be deployed"
+        echo -e "  ${BOLD}NGINX Proxy Mgr:${NC}     Will be deployed"
     else
-        echo -e "  ${BOLD}NGINX Proxy Mgr:${NC}   External/manual"
+        echo -e "  ${BOLD}NGINX Proxy Mgr:${NC}     External/manual"
     fi
 
     echo ""
 
     if ! prompt_yes_no "Does this look correct?" "y"; then
         print_info "Let's start over..."
+        select_identity_provider
         collect_configuration
     fi
 }
@@ -330,6 +330,31 @@ generate_secrets() {
     RELAY_AUTH_SECRET=$(generate_secret)
     print_success "Relay auth secret generated"
 
+    # Generate IDP-specific secrets if deploying
+    if [[ "$IDP_MODE" == "deploy" ]]; then
+        case "$SELECTED_IDP" in
+            zitadel)
+                print_step "Generating Zitadel secrets..."
+                ZITADEL_DB_PASSWORD=$(generate_secret)
+                ZITADEL_MASTERKEY=$(openssl rand -base64 32)
+                ZITADEL_ADMIN_PASSWORD="Admin$(generate_secret | cut -c1-8)!"
+                print_success "Zitadel secrets generated"
+                ;;
+            authentik)
+                print_step "Generating Authentik secrets..."
+                AUTHENTIK_DB_PASSWORD=$(generate_secret)
+                AUTHENTIK_SECRET_KEY=$(openssl rand -base64 60 | tr -d '\n')
+                print_success "Authentik secrets generated"
+                ;;
+            keycloak)
+                print_step "Generating Keycloak secrets..."
+                KEYCLOAK_DB_PASSWORD=$(generate_secret)
+                KEYCLOAK_ADMIN_PASSWORD="Admin$(generate_secret | cut -c1-8)!"
+                print_success "Keycloak secrets generated"
+                ;;
+        esac
+    fi
+
     echo ""
     print_success "All secrets generated securely!"
 }
@@ -341,7 +366,7 @@ generate_secrets() {
 update_configuration_files() {
     print_section "Updating Configuration Files"
 
-    # Backup existing files if they have been modified
+    # Backup existing files
     for file in .env dashboard.env relay.env management.json turnserver.conf; do
         if [[ -f "$file" ]]; then
             if ! grep -q "example.com" "$file" 2>/dev/null; then
@@ -351,61 +376,91 @@ update_configuration_files() {
         fi
     done
 
-    # Update .env
-    print_step "Updating .env..."
+    # Generate .env
+    print_step "Generating .env..."
+    generate_env_file
+    print_success ".env generated"
+
+    # Generate dashboard.env using IDP-specific function
+    print_step "Generating dashboard.env..."
+    "generate_${SELECTED_IDP}_dashboard_env" "$NETBIRD_DOMAIN" > dashboard.env
+    print_success "dashboard.env generated"
+
+    # Generate relay.env
+    print_step "Generating relay.env..."
+    generate_relay_env
+    print_success "relay.env generated"
+
+    # Generate turnserver.conf
+    print_step "Generating turnserver.conf..."
+    generate_turnserver_conf
+    print_success "turnserver.conf generated"
+
+    # Generate management.json using IDP-specific function
+    print_step "Generating management.json..."
+    "generate_${SELECTED_IDP}_management_json" "$NETBIRD_DOMAIN" "$RELAY_AUTH_SECRET" > management.json
+    print_success "management.json generated"
+
+    echo ""
+    print_success "All configuration files generated!"
+}
+
+generate_env_file() {
     cat > .env << EOF
 # =============================================================================
-# NetBird Self-Hosted with PocketID - Environment Configuration
+# NetBird Self-Hosted - Environment Configuration
 # =============================================================================
 # Generated by setup.sh on $(date)
+# Identity Provider: ${IDP_NAMES[$SELECTED_IDP]}
 # =============================================================================
 
 # Domain Configuration
-NETBIRD_DOMAIN=$NETBIRD_DOMAIN
-POCKETID_URL=$POCKETID_URL
+NETBIRD_DOMAIN=${NETBIRD_DOMAIN}
+
+# Identity Provider
+SELECTED_IDP=${SELECTED_IDP}
+IDP_URL=${IDP_URL}
+IDP_MODE=${IDP_MODE}
+EOF
+
+    # Add IDP-specific domain if deploying
+    if [[ "$IDP_MODE" == "deploy" ]]; then
+        case "$SELECTED_IDP" in
+            pocketid)
+                echo "POCKETID_URL=${IDP_URL}" >> .env
+                ;;
+            zitadel)
+                echo "ZITADEL_DOMAIN=${IDP_DOMAIN}" >> .env
+                echo "ZITADEL_DB_PASSWORD=${ZITADEL_DB_PASSWORD}" >> .env
+                echo "ZITADEL_MASTERKEY=${ZITADEL_MASTERKEY}" >> .env
+                echo "ZITADEL_ADMIN_PASSWORD=${ZITADEL_ADMIN_PASSWORD}" >> .env
+                ;;
+            authentik)
+                echo "AUTHENTIK_DOMAIN=${IDP_DOMAIN}" >> .env
+                echo "AUTHENTIK_DB_PASSWORD=${AUTHENTIK_DB_PASSWORD}" >> .env
+                echo "AUTHENTIK_SECRET_KEY=${AUTHENTIK_SECRET_KEY}" >> .env
+                ;;
+            keycloak)
+                echo "KEYCLOAK_DOMAIN=${IDP_DOMAIN}" >> .env
+                echo "KEYCLOAK_DB_PASSWORD=${KEYCLOAK_DB_PASSWORD}" >> .env
+                echo "KEYCLOAK_ADMIN_USER=admin" >> .env
+                echo "KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD}" >> .env
+                ;;
+        esac
+    fi
+
+    cat >> .env << EOF
 
 # Secrets (auto-generated)
-TURN_PASSWORD=$TURN_PASSWORD
-RELAY_AUTH_SECRET=$RELAY_AUTH_SECRET
+TURN_PASSWORD=${TURN_PASSWORD}
+RELAY_AUTH_SECRET=${RELAY_AUTH_SECRET}
 
 # Optional: MaxMind GeoIP Database
 MAXMIND_LICENSE_KEY=
 EOF
-    print_success ".env updated"
+}
 
-    # Update dashboard.env
-    print_step "Updating dashboard.env..."
-    cat > dashboard.env << EOF
-# =============================================================================
-# NetBird Dashboard - Environment Configuration
-# =============================================================================
-# Generated by setup.sh on $(date)
-# =============================================================================
-
-# Endpoints
-NETBIRD_MGMT_API_ENDPOINT=https://$NETBIRD_DOMAIN
-NETBIRD_MGMT_GRPC_API_ENDPOINT=https://$NETBIRD_DOMAIN
-
-# OIDC Configuration
-AUTH_AUDIENCE=${POCKETID_CLIENT_ID:-your-pocketid-client-id}
-AUTH_CLIENT_ID=${POCKETID_CLIENT_ID:-your-pocketid-client-id}
-AUTH_AUTHORITY=$POCKETID_URL
-USE_AUTH0=false
-AUTH_SUPPORTED_SCOPES=openid profile email groups offline_access
-AUTH_REDIRECT_URI=/auth
-AUTH_SILENT_REDIRECT_URI=/silent-auth
-
-# Token Configuration
-NETBIRD_TOKEN_SOURCE=idToken
-
-# SSL Configuration
-NGINX_SSL_PORT=443
-LETSENCRYPT_DOMAIN=none
-EOF
-    print_success "dashboard.env updated"
-
-    # Update relay.env
-    print_step "Updating relay.env..."
+generate_relay_env() {
     cat > relay.env << EOF
 # =============================================================================
 # NetBird Relay Server - Environment Configuration
@@ -420,15 +475,14 @@ NB_LOG_LEVEL=info
 NB_LISTEN_ADDRESS=:80
 
 # Exposed Address
-NB_EXPOSED_ADDRESS=rels://$NETBIRD_DOMAIN:443/relay
+NB_EXPOSED_ADDRESS=rels://${NETBIRD_DOMAIN}:443/relay
 
 # Authentication Secret
-NB_AUTH_SECRET=$RELAY_AUTH_SECRET
+NB_AUTH_SECRET=${RELAY_AUTH_SECRET}
 EOF
-    print_success "relay.env updated"
+}
 
-    # Update turnserver.conf
-    print_step "Updating turnserver.conf..."
+generate_turnserver_conf() {
     cat > turnserver.conf << EOF
 # =============================================================================
 # Coturn TURN Server - Configuration
@@ -451,10 +505,10 @@ fingerprint
 lt-cred-mech
 
 # TURN user credentials
-user=netbird:$TURN_PASSWORD
+user=netbird:${TURN_PASSWORD}
 
 # Realm
-realm=$NETBIRD_DOMAIN
+realm=${NETBIRD_DOMAIN}
 
 # Logging
 log-file=stdout
@@ -464,80 +518,6 @@ no-software-attribute
 pidfile="/var/tmp/turnserver.pid"
 no-cli
 EOF
-    print_success "turnserver.conf updated"
-
-    # Update management.json
-    print_step "Updating management.json..."
-    cat > management.json << EOF
-{
-    "Stuns": [
-        {
-            "Proto": "udp",
-            "URI": "stun:$NETBIRD_DOMAIN:3478"
-        }
-    ],
-    "Relay": {
-        "Addresses": ["rels://$NETBIRD_DOMAIN:443/relay"],
-        "CredentialsTTL": "24h",
-        "Secret": "$RELAY_AUTH_SECRET"
-    },
-    "Signal": {
-        "Proto": "https",
-        "URI": "$NETBIRD_DOMAIN:443"
-    },
-    "HttpConfig": {
-        "AuthIssuer": "$POCKETID_URL",
-        "AuthAudience": "${POCKETID_CLIENT_ID:-your-pocketid-client-id}",
-        "OIDCConfigEndpoint": "$POCKETID_URL/.well-known/openid-configuration"
-    },
-    "IdpManagerConfig": {
-        "ManagerType": "pocketid",
-        "ClientID": "netbird",
-        "Extra": {
-            "ManagementEndpoint": "$POCKETID_URL",
-            "ApiToken": "${POCKETID_API_TOKEN:-your-pocketid-api-token-here}"
-        }
-    },
-    "DeviceAuthorizationFlow": {
-        "Provider": "none"
-    },
-    "PKCEAuthorizationFlow": {
-        "ProviderConfig": {
-            "Audience": "${POCKETID_CLIENT_ID:-your-pocketid-client-id}",
-            "ClientID": "${POCKETID_CLIENT_ID:-your-pocketid-client-id}",
-            "Scope": "openid profile email groups offline_access",
-            "RedirectURLs": ["http://localhost:53000", "http://localhost:54000"]
-        }
-    }
-}
-EOF
-    print_success "management.json updated"
-
-    # Update compose.yaml if not deploying NPM
-    if [[ "$DEPLOY_NPM" == "false" ]]; then
-        print_step "Updating compose.yaml (removing NGINX Proxy Manager)..."
-
-        # Create a version without NPM
-        if [[ -f "compose.yaml" ]]; then
-            # Comment out the nginx-proxy-manager service
-            sed -i.bak '/nginx-proxy-manager:/,/logging:/{ s/^/#/; }' compose.yaml 2>/dev/null || true
-            print_warning "NGINX Proxy Manager service commented out in compose.yaml"
-            print_info "You'll need to configure your own reverse proxy"
-        fi
-    fi
-
-    # Handle existing PocketID
-    if [[ "$EXISTING_POCKETID" == "true" ]]; then
-        print_step "Updating compose.yaml (removing PocketID service)..."
-
-        if [[ -f "compose.yaml" ]]; then
-            # We'll just note this - don't modify the compose file automatically
-            print_warning "Using external PocketID - you may want to remove the pocketid service from compose.yaml"
-        fi
-    fi
-
-    echo ""
-    print_success "All configuration files updated!"
 }
 
 # -----------------------------------------------------------------------------
@@ -548,25 +528,59 @@ start_services() {
     print_section "Starting Services"
 
     if ! prompt_yes_no "Start the Docker services now?" "y"; then
-        print_info "You can start the services later with: docker compose up -d"
+        print_info "You can start the services later."
+        print_start_commands
         return
     fi
 
+    # Determine compose command based on IDP mode
+    local compose_cmd="$DOCKER_COMPOSE_CMD"
+
+    if [[ "$IDP_MODE" == "deploy" ]]; then
+        local idp_compose="${SCRIPT_DIR}/idp/${SELECTED_IDP}/compose.yaml"
+        if [[ -f "$idp_compose" ]]; then
+            compose_cmd="$DOCKER_COMPOSE_CMD -f compose.yaml -f $idp_compose"
+            print_info "Including ${IDP_NAMES[$SELECTED_IDP]} services"
+        fi
+    fi
+
+    # Remove NPM service if not deploying
+    if [[ "$DEPLOY_NPM" == "false" ]]; then
+        print_warning "NGINX Proxy Manager not included - using external reverse proxy"
+    fi
+
+    # Create network first
+    print_step "Creating Docker network..."
+    docker network create netbird 2>/dev/null || true
+
     print_step "Pulling Docker images..."
-    $DOCKER_COMPOSE_CMD pull
+    $compose_cmd pull
     print_success "Images pulled"
 
     print_step "Starting services..."
-    $DOCKER_COMPOSE_CMD up -d
+    $compose_cmd up -d
     print_success "Services started"
 
     echo ""
     print_step "Waiting for services to be healthy..."
     sleep 5
 
-    # Check service status
     echo ""
-    $DOCKER_COMPOSE_CMD ps
+    $compose_cmd ps
+}
+
+print_start_commands() {
+    echo ""
+    print_info "To start services manually, run:"
+    echo ""
+
+    if [[ "$IDP_MODE" == "deploy" ]]; then
+        echo "  docker compose -f compose.yaml -f idp/${SELECTED_IDP}/compose.yaml up -d"
+    else
+        echo "  docker compose up -d"
+    fi
+
+    echo ""
 }
 
 # -----------------------------------------------------------------------------
@@ -576,6 +590,7 @@ start_services() {
 print_next_steps() {
     print_section "Next Steps"
 
+    # NPM configuration
     if [[ "$DEPLOY_NPM" == "true" ]]; then
         echo -e "${BOLD}1. Configure NGINX Proxy Manager${NC}"
         echo ""
@@ -583,116 +598,134 @@ print_next_steps() {
         echo "   Default login: admin@example.com / changeme"
         echo ""
         echo "   Create proxy hosts for:"
-        if [[ "$EXISTING_POCKETID" == "false" ]]; then
-            echo "   - $POCKETID_URL -> pocketid:80"
+        if [[ "$IDP_MODE" == "deploy" ]]; then
+            echo "   - ${IDP_URL} -> ${SELECTED_IDP}:80"
         fi
-        echo "   - https://$NETBIRD_DOMAIN -> dashboard:80"
+        echo "   - https://${NETBIRD_DOMAIN} -> dashboard:80"
         echo ""
         echo "   See README.md for detailed NGINX configuration including"
         echo "   gRPC and WebSocket proxy settings."
         echo ""
     fi
 
-    if [[ "$EXISTING_POCKETID" == "false" ]]; then
-        echo -e "${BOLD}2. Configure PocketID${NC}"
-        echo ""
-        echo "   Access PocketID: $POCKETID_URL"
-        echo "   Complete the initial setup wizard."
-        echo ""
-        echo "   Create OIDC Client:"
-        echo "   - Name: NetBird"
-        echo "   - Callback URLs:"
-        echo "     - http://localhost:53000"
-        echo "     - https://$NETBIRD_DOMAIN/auth"
-        echo "     - https://$NETBIRD_DOMAIN/silent-auth"
-        echo "   - Logout URL: https://$NETBIRD_DOMAIN/"
-        echo "   - Public Client: On"
-        echo "   - PKCE: On"
-        echo ""
-        echo "   Create API Key:"
-        echo "   - Name: NetBird Management"
-        echo ""
-        echo -e "${BOLD}3. Update Configuration with PocketID Credentials${NC}"
-        echo ""
-        echo "   Run this script again with --update-pocketid flag, or manually update:"
-        echo "   - dashboard.env: AUTH_CLIENT_ID and AUTH_AUDIENCE"
-        echo "   - management.json: All client ID and API token references"
-        echo ""
-        echo "   Then restart: docker compose restart dashboard management"
-        echo ""
-    fi
+    # IDP-specific instructions
+    "print_${SELECTED_IDP}_post_install"
 
+    # Verification
     echo -e "${BOLD}Verify Installation${NC}"
     echo ""
-    echo "   Dashboard: https://$NETBIRD_DOMAIN"
-    echo "   Login with your PocketID credentials"
+    echo "   Dashboard: https://${NETBIRD_DOMAIN}"
+    echo "   Login with your ${IDP_NAMES[$SELECTED_IDP]} credentials"
     echo ""
 
+    # Connect clients
     echo -e "${BOLD}Connect Clients${NC}"
     echo ""
-    echo "   netbird up --management-url https://$NETBIRD_DOMAIN"
+    echo "   netbird up --management-url https://${NETBIRD_DOMAIN}"
     echo ""
 
+    # Troubleshooting
     echo -e "${BOLD}Troubleshooting${NC}"
     echo ""
-    echo "   View logs: docker compose logs -f"
-    echo "   Check status: docker compose ps"
-    echo "   Restart: docker compose restart"
+    if [[ "$IDP_MODE" == "deploy" ]]; then
+        echo "   View logs: docker compose -f compose.yaml -f idp/${SELECTED_IDP}/compose.yaml logs -f"
+        echo "   Check status: docker compose -f compose.yaml -f idp/${SELECTED_IDP}/compose.yaml ps"
+    else
+        echo "   View logs: docker compose logs -f"
+        echo "   Check status: docker compose ps"
+    fi
     echo ""
 
     print_success "Setup complete!"
 }
 
 # -----------------------------------------------------------------------------
-# Update PocketID Credentials (for after initial setup)
+# Update Credentials (for after initial IDP setup)
 # -----------------------------------------------------------------------------
 
-update_pocketid_credentials() {
-    print_section "Update PocketID Credentials"
+update_credentials() {
+    print_section "Update IDP Credentials"
 
-    print_info "This will update the configuration files with your PocketID credentials."
-    echo ""
-
-    prompt_input "Enter your PocketID OIDC Client ID" "" "POCKETID_CLIENT_ID"
-    prompt_secret "Enter your PocketID API Token" "POCKETID_API_TOKEN"
-
-    if [[ -z "$POCKETID_CLIENT_ID" ]] || [[ -z "$POCKETID_API_TOKEN" ]]; then
-        print_error "Both Client ID and API Token are required"
-        exit 1
-    fi
-
-    # Read current domain from .env
+    # Load current configuration
     if [[ -f ".env" ]]; then
         source .env 2>/dev/null || true
     fi
+
+    if [[ -z "$SELECTED_IDP" ]]; then
+        print_error "No IDP configuration found. Run ./setup.sh first."
+        exit 1
+    fi
+
+    print_info "Current IDP: ${IDP_NAMES[$SELECTED_IDP]}"
+    print_info "Updating credentials for ${IDP_NAMES[$SELECTED_IDP]}..."
+    echo ""
+
+    # Source IDP config and collect credentials
+    source "${SCRIPT_DIR}/idp/${SELECTED_IDP}/config.sh"
+
+    # Set IDP_URL from saved config
+    if [[ -n "$IDP_URL" ]]; then
+        print_info "IDP URL: $IDP_URL"
+    fi
+
+    # Collect new credentials based on IDP type
+    case "$SELECTED_IDP" in
+        zitadel)
+            prompt_input "Enter OIDC Client ID" "" "IDP_CLIENT_ID"
+            prompt_input "Enter Service User Client ID" "netbird" "IDP_MGMT_CLIENT_ID"
+            prompt_secret "Enter Service User Client Secret" "IDP_MGMT_CLIENT_SECRET"
+            IDP_OIDC_ENDPOINT="${IDP_URL}/.well-known/openid-configuration"
+            IDP_MGMT_ENDPOINT="${IDP_URL}/management/v1"
+            ;;
+        authentik)
+            prompt_input "Enter Provider Client ID" "" "IDP_CLIENT_ID"
+            prompt_input "Enter Service Account Username" "Netbird" "IDP_MGMT_USERNAME"
+            prompt_secret "Enter Service Account App Password" "IDP_MGMT_PASSWORD"
+            IDP_OIDC_ENDPOINT="${IDP_URL}/application/o/netbird/.well-known/openid-configuration"
+            ;;
+        keycloak)
+            prompt_input "Enter Realm name" "netbird" "KEYCLOAK_REALM"
+            prompt_input "Enter Frontend Client ID" "netbird-client" "IDP_CLIENT_ID"
+            prompt_input "Enter Backend Client ID" "netbird-backend" "IDP_MGMT_CLIENT_ID"
+            prompt_secret "Enter Backend Client Secret" "IDP_MGMT_CLIENT_SECRET"
+            IDP_OIDC_ENDPOINT="${IDP_URL}/realms/${KEYCLOAK_REALM}/.well-known/openid-configuration"
+            IDP_ADMIN_ENDPOINT="${IDP_URL}/admin/realms/${KEYCLOAK_REALM}"
+            ;;
+        pocketid)
+            prompt_input "Enter OIDC Client ID" "" "IDP_CLIENT_ID"
+            prompt_secret "Enter API Token" "IDP_API_TOKEN"
+            IDP_OIDC_ENDPOINT="${IDP_URL}/.well-known/openid-configuration"
+            IDP_MGMT_ENDPOINT="${IDP_URL}"
+            ;;
+    esac
 
     if [[ -z "$NETBIRD_DOMAIN" ]]; then
         prompt_input "Enter your NetBird domain" "" "NETBIRD_DOMAIN"
     fi
 
-    if [[ -z "$POCKETID_URL" ]]; then
-        prompt_input "Enter your PocketID URL" "" "POCKETID_URL"
+    if [[ -z "$RELAY_AUTH_SECRET" ]]; then
+        RELAY_AUTH_SECRET=$(generate_secret)
     fi
 
+    # Regenerate configuration files
     print_step "Updating dashboard.env..."
-    sed -i "s|AUTH_AUDIENCE=.*|AUTH_AUDIENCE=$POCKETID_CLIENT_ID|g" dashboard.env
-    sed -i "s|AUTH_CLIENT_ID=.*|AUTH_CLIENT_ID=$POCKETID_CLIENT_ID|g" dashboard.env
+    "generate_${SELECTED_IDP}_dashboard_env" "$NETBIRD_DOMAIN" > dashboard.env
     print_success "dashboard.env updated"
 
     print_step "Updating management.json..."
-    # Update management.json using sed (safer than jq for preserving formatting)
-    sed -i "s|\"AuthAudience\": \"[^\"]*\"|\"AuthAudience\": \"$POCKETID_CLIENT_ID\"|g" management.json
-    sed -i "s|\"ApiToken\": \"[^\"]*\"|\"ApiToken\": \"$POCKETID_API_TOKEN\"|g" management.json
-    sed -i "s|\"Audience\": \"[^\"]*\"|\"Audience\": \"$POCKETID_CLIENT_ID\"|g" management.json
-    sed -i "s|\"ClientID\": \"[^\"]*\"|\"ClientID\": \"$POCKETID_CLIENT_ID\"|g" management.json
+    "generate_${SELECTED_IDP}_management_json" "$NETBIRD_DOMAIN" "$RELAY_AUTH_SECRET" > management.json
     print_success "management.json updated"
 
     echo ""
-    print_success "PocketID credentials updated!"
+    print_success "Credentials updated!"
     echo ""
 
     if prompt_yes_no "Restart dashboard and management services?" "y"; then
-        $DOCKER_COMPOSE_CMD restart dashboard management
+        if [[ "$IDP_MODE" == "deploy" ]]; then
+            $DOCKER_COMPOSE_CMD -f compose.yaml -f "idp/${SELECTED_IDP}/compose.yaml" restart dashboard management
+        else
+            $DOCKER_COMPOSE_CMD restart dashboard management
+        fi
         print_success "Services restarted"
     else
         print_info "Remember to restart services: docker compose restart dashboard management"
@@ -718,19 +751,13 @@ reset_configuration() {
     # Stop services if running
     if $DOCKER_COMPOSE_CMD ps -q &> /dev/null; then
         print_step "Stopping services..."
-        $DOCKER_COMPOSE_CMD down
+        $DOCKER_COMPOSE_CMD down 2>/dev/null || true
     fi
 
     # Remove configuration files
     print_step "Removing configuration files..."
     rm -f .env dashboard.env relay.env management.json turnserver.conf
     rm -f .env.bak dashboard.env.bak relay.env.bak management.json.bak turnserver.conf.bak
-
-    # Restore from git if possible
-    if command -v git &> /dev/null && [[ -d "../.git" ]]; then
-        print_step "Restoring default files from git..."
-        git checkout -- .env dashboard.env relay.env management.json turnserver.conf 2>/dev/null || true
-    fi
 
     print_success "Configuration reset complete!"
     print_info "Run ./setup.sh to reconfigure"
@@ -741,19 +768,25 @@ reset_configuration() {
 # -----------------------------------------------------------------------------
 
 show_help() {
-    echo "NetBird Self-Hosted with PocketID - Setup Script"
+    echo "NetBird Self-Hosted - Setup Script"
     echo ""
     echo "Usage: ./setup.sh [OPTIONS]"
     echo ""
     echo "Options:"
     echo "  --help, -h              Show this help message"
-    echo "  --update-pocketid       Update PocketID client ID and API token"
+    echo "  --update-credentials    Update IDP client ID and credentials"
     echo "  --reset                 Reset all configuration files"
     echo "  --check                 Check prerequisites only"
     echo ""
+    echo "Supported Identity Providers:"
+    echo "  - Zitadel     (Full-featured, device auth, recommended)"
+    echo "  - Authentik   (Flexible, security-focused)"
+    echo "  - Keycloak    (Popular enterprise IAM)"
+    echo "  - PocketID    (Lightweight, simple)"
+    echo ""
     echo "Examples:"
     echo "  ./setup.sh                      Run interactive setup"
-    echo "  ./setup.sh --update-pocketid    Update PocketID credentials after initial setup"
+    echo "  ./setup.sh --update-credentials Update IDP credentials after initial setup"
     echo "  ./setup.sh --reset              Reset configuration to defaults"
     echo ""
 }
@@ -764,7 +797,7 @@ show_help() {
 
 main() {
     # Change to script directory
-    cd "$(dirname "$0")"
+    cd "$SCRIPT_DIR"
 
     # Parse arguments
     case "${1:-}" in
@@ -772,10 +805,10 @@ main() {
             show_help
             exit 0
             ;;
-        --update-pocketid)
+        --update-credentials)
             print_banner
             check_prerequisites
-            update_pocketid_credentials
+            update_credentials
             exit 0
             ;;
         --reset)
@@ -800,7 +833,8 @@ main() {
 
     print_banner
 
-    echo "Welcome! This script will help you set up NetBird with PocketID."
+    echo "Welcome! This script will help you set up NetBird with your choice of"
+    echo "identity provider."
     echo ""
     echo "What you'll need:"
     echo "  - A domain name with DNS configured"
@@ -815,6 +849,7 @@ main() {
     fi
 
     check_prerequisites
+    select_identity_provider
     collect_configuration
     generate_secrets
     update_configuration_files

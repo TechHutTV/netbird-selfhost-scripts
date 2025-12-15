@@ -1,3 +1,16 @@
+# =============================================================================
+# NetBird Self-Hosted - Base Docker Compose Configuration
+# =============================================================================
+# This is the base configuration for NetBird services.
+#
+# IDP services are in separate compose files under idp/<provider>/compose.yaml
+# To include an IDP, use:
+#   docker compose -f compose.yaml -f idp/<provider>/compose.yaml up -d
+#
+# Or if using an existing IDP, just use:
+#   docker compose up -d
+# =============================================================================
+
 services:
   # =============================================================================
   # NGINX Proxy Manager - Reverse Proxy with SSL
@@ -21,29 +34,6 @@ services:
       test: ["CMD", "/usr/bin/check-health"]
       interval: 10s
       timeout: 3s
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "100m"
-        max-file: "2"
-
-  # =============================================================================
-  # PocketID - OIDC Identity Provider
-  # =============================================================================
-  pocketid:
-    image: stonith404/pocket-id:latest
-    container_name: pocketid
-    restart: unless-stopped
-    networks:
-      - netbird
-    ports:
-      - "3000:80"  # Exposed for initial setup, route through NPM after
-    volumes:
-      - pocketid_data:/app/backend/data
-    environment:
-      - PUBLIC_APP_URL=${POCKETID_URL:-https://auth.example.com}
-      - TRUST_PROXY=true
-      - MAXMIND_LICENSE_KEY=${MAXMIND_LICENSE_KEY:-}
     logging:
       driver: "json-file"
       options:
@@ -153,7 +143,6 @@ services:
 volumes:
   npm_data:
   npm_letsencrypt:
-  pocketid_data:
   netbird_management:
 
 # =============================================================================
