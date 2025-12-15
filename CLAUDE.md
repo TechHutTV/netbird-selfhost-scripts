@@ -26,6 +26,110 @@ NetBird is an open-source platform for creating secure private networks using Wi
 | 33080 | TCP/UDP | Relay (WebSocket + QUIC) |
 | 3478 | UDP | Coturn STUN/TURN |
 
+### Firewall Requirements (UFW on Ubuntu)
+
+If you're running UFW (Uncomplicated Firewall) on Ubuntu, follow these steps to open the required ports for NetBird:
+
+#### Step 1: Check UFW Status
+
+```bash
+sudo ufw status
+```
+
+If UFW is inactive, enable it (ensure SSH is allowed first):
+
+```bash
+sudo ufw allow OpenSSH
+sudo ufw enable
+```
+
+#### Step 2: Allow Required TCP Ports
+
+```bash
+# HTTP (Let's Encrypt certificate validation)
+sudo ufw allow 80/tcp comment 'NetBird - HTTP/Let'\''s Encrypt'
+
+# HTTPS (Dashboard, Management API, Signal)
+sudo ufw allow 443/tcp comment 'NetBird - HTTPS/Dashboard/Management'
+
+# Signal gRPC API (if using non-standard port)
+sudo ufw allow 10000/tcp comment 'NetBird - Signal gRPC'
+
+# Relay WebSocket
+sudo ufw allow 33080/tcp comment 'NetBird - Relay WebSocket'
+```
+
+#### Step 3: Allow Required UDP Ports
+
+```bash
+# Coturn STUN/TURN
+sudo ufw allow 3478/udp comment 'NetBird - Coturn STUN/TURN'
+
+# Relay QUIC
+sudo ufw allow 33080/udp comment 'NetBird - Relay QUIC'
+```
+
+#### Step 4: Allow Coturn UDP Port Range (Optional but Recommended)
+
+Coturn uses ephemeral ports for TURN relay. By default, these are in the range 49152-65535:
+
+```bash
+sudo ufw allow 49152:65535/udp comment 'NetBird - Coturn relay ports'
+```
+
+**Note:** You can customize this range in `turnserver.conf` using `min-port` and `max-port` to reduce the number of open ports.
+
+#### Step 5: Verify Configuration
+
+```bash
+sudo ufw status verbose
+```
+
+Expected output should show:
+
+```
+To                         Action      From
+--                         ------      ----
+OpenSSH                    ALLOW       Anywhere
+80/tcp                     ALLOW       Anywhere                   # NetBird - HTTP/Let's Encrypt
+443/tcp                    ALLOW       Anywhere                   # NetBird - HTTPS/Dashboard/Management
+10000/tcp                  ALLOW       Anywhere                   # NetBird - Signal gRPC
+33080/tcp                  ALLOW       Anywhere                   # NetBird - Relay WebSocket
+3478/udp                   ALLOW       Anywhere                   # NetBird - Coturn STUN/TURN
+33080/udp                  ALLOW       Anywhere                   # NetBird - Relay QUIC
+49152:65535/udp            ALLOW       Anywhere                   # NetBird - Coturn relay ports
+```
+
+#### Step 6: Reload UFW (if needed)
+
+```bash
+sudo ufw reload
+```
+
+#### Quick One-Liner Setup
+
+For convenience, run all firewall rules at once:
+
+```bash
+sudo ufw allow OpenSSH && \
+sudo ufw allow 80/tcp && \
+sudo ufw allow 443/tcp && \
+sudo ufw allow 10000/tcp && \
+sudo ufw allow 33080/tcp && \
+sudo ufw allow 3478/udp && \
+sudo ufw allow 33080/udp && \
+sudo ufw allow 49152:65535/udp && \
+sudo ufw --force enable && \
+sudo ufw status
+```
+
+#### Troubleshooting UFW Issues
+
+- **Locked out of SSH?** Use cloud provider console to disable UFW or add SSH rule
+- **Coturn not working?** Ensure UDP 3478 and the relay port range are open
+- **Peers can't connect?** Verify both TCP and UDP on port 33080 are allowed
+- **Let's Encrypt failing?** Confirm port 80/tcp is open and not blocked by cloud firewall
+
 ## Identity Providers
 
 NetBird uses OpenID Connect (OIDC) for authentication. The following providers are supported:
