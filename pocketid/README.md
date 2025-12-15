@@ -2,6 +2,28 @@
 
 This guide walks you through deploying NetBird self-hosted with [PocketID](https://github.com/stonith404/pocket-id) as the identity provider and NGINX Proxy Manager for SSL/reverse proxy.
 
+## Required DNS Records
+
+Before starting, create the following **A records** pointing to your server's IP address:
+
+| Subdomain | Purpose | Required |
+|-----------|---------|----------|
+| `netbird.yourdomain.com` | NetBird Dashboard, Management API, Signal, and Relay | ✅ Yes |
+| `auth.yourdomain.com` | PocketID authentication server | ✅ Yes |
+| `npm.yourdomain.com` | NGINX Proxy Manager admin panel | ❌ Optional |
+
+**Example:** If your server IP is `203.0.113.50` and your domain is `example.com`:
+
+```
+netbird.example.com    A    203.0.113.50
+auth.example.com       A    203.0.113.50
+npm.example.com        A    203.0.113.50   (optional)
+```
+
+> **Note:** DNS propagation can take a few minutes to several hours. Verify your records are resolving before running the setup script using `dig netbird.yourdomain.com` or an online DNS checker.
+
+---
+
 ## Quick Start (Recommended)
 
 The easiest way to get started is using our interactive setup script:
