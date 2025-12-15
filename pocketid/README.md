@@ -74,9 +74,12 @@ AUTH_AUDIENCE=your-pocketid-client-id
 AUTH_CLIENT_ID=your-pocketid-client-id
 AUTH_AUTHORITY=https://auth.example.com
 USE_AUTH0=false
-AUTH_SUPPORTED_SCOPES=openid profile email offline_access
-AUTH_REDIRECT_URI=/nb-auth
-AUTH_SILENT_REDIRECT_URI=/nb-silent-auth
+AUTH_SUPPORTED_SCOPES=openid profile email groups offline_access
+AUTH_REDIRECT_URI=/auth
+AUTH_SILENT_REDIRECT_URI=/silent-auth
+
+# Token Configuration
+NETBIRD_TOKEN_SOURCE=idToken
 
 # SSL
 NGINX_SSL_PORT=443
@@ -88,7 +91,7 @@ LETSENCRYPT_DOMAIN=none
 ```bash
 NB_LOG_LEVEL=info
 NB_LISTEN_ADDRESS=:80
-NB_EXPOSED_ADDRESS=rels://netbird.example.com:443
+NB_EXPOSED_ADDRESS=rels://netbird.example.com:443/relay
 NB_AUTH_SECRET=your-relay-secret-here
 ```
 
@@ -120,7 +123,7 @@ no-cli
         }
     ],
     "Relay": {
-        "Addresses": ["rels://netbird.example.com:443"],
+        "Addresses": ["rels://netbird.example.com:443/relay"],
         "CredentialsTTL": "24h",
         "Secret": "your-relay-secret-here"
     },
@@ -134,7 +137,12 @@ no-cli
         "OIDCConfigEndpoint": "https://auth.example.com/.well-known/openid-configuration"
     },
     "IdpManagerConfig": {
-        "ManagerType": "none"
+        "ManagerType": "pocketid",
+        "ClientID": "netbird",
+        "Extra": {
+            "ManagementEndpoint": "https://auth.example.com",
+            "ApiToken": "your-pocketid-api-token-here"
+        }
     },
     "DeviceAuthorizationFlow": {
         "Provider": "none"
@@ -143,8 +151,8 @@ no-cli
         "ProviderConfig": {
             "Audience": "your-pocketid-client-id",
             "ClientID": "your-pocketid-client-id",
-            "Scope": "openid profile email offline_access",
-            "RedirectURLs": ["http://localhost:53000/", "http://localhost:54000/"]
+            "Scope": "openid profile email groups offline_access",
+            "RedirectURLs": ["http://localhost:53000", "http://localhost:54000"]
         }
     }
 }
@@ -200,9 +208,9 @@ location /relay {
     proxy_set_header X-Real-IP $remote_addr;
 }
 
-# Signal WebSocket
+# Signal gRPC
 location /signalexchange.SignalExchange/ {
-    grpc_pass grpc://signal:10000;
+    grpc_pass grpc://signal:80;
     grpc_set_header Host $host;
 }
 
@@ -233,39 +241,43 @@ location /management.ManagementService/ {
 2. Complete the initial setup wizard
 3. Create an admin account
 
-#### Create OIDC Client for NetBird Dashboard
+#### Create OIDC Client for NetBird
 
 1. Go to **Admin** > **OIDC Clients**
 2. Click **Create Client**
 3. Configure:
-   - **Name**: NetBird Dashboard
+   - **Name**: NetBird
+   - **Client Launch URL**: `https://netbird.example.com`
    - **Callback URLs**:
-     - `https://netbird.example.com/nb-auth`
-     - `https://netbird.example.com/nb-silent-auth`
-   - **Logout URL**: `https://netbird.example.com/`
-4. Save and copy the **Client ID**
+     - `http://localhost:53000`
+     - `https://netbird.example.com/auth`
+     - `https://netbird.example.com/silent-auth`
+   - **Logout Callback URL**: `https://netbird.example.com/`
+   - **Public Client**: On
+   - **PKCE**: On
+4. Click **Save** and copy the **Client ID**
 
-#### Create OIDC Client for NetBird CLI
+#### Create API Key for NetBird Management
 
-1. Create another client
-2. Configure:
-   - **Name**: NetBird CLI
-   - **Callback URLs**:
-     - `http://localhost:53000/`
-     - `http://localhost:54000/`
-3. Save and copy the **Client ID**
+1. Go to **Admin** > **API Keys**
+2. Click **Add API Key**
+3. Configure:
+   - **Name**: NetBird Management
+   - **Expires At**: Pick a date in the future
+4. Click **Save** and copy the **API Key**
 
-### Step 6: Update Configuration with PocketID Client IDs
+### Step 6: Update Configuration with PocketID Client ID and API Key
 
 Update `dashboard.env`:
 ```bash
-AUTH_AUDIENCE=dashboard-client-id-from-pocketid
-AUTH_CLIENT_ID=dashboard-client-id-from-pocketid
+AUTH_AUDIENCE=your-client-id-from-pocketid
+AUTH_CLIENT_ID=your-client-id-from-pocketid
 ```
 
 Update `management.json`:
-- Replace all `your-pocketid-client-id` with the dashboard client ID
-- For CLI connections, use the CLI client ID in `PKCEAuthorizationFlow`
+- Replace all `your-pocketid-client-id` with the Client ID from PocketID
+- Replace `your-pocketid-api-token-here` with the API Key from PocketID
+- Update the `ManagementEndpoint` in `IdpManagerConfig.Extra` to your PocketID URL
 
 ### Step 7: Restart Services
 

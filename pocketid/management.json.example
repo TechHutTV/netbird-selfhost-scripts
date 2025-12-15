@@ -1,5 +1,5 @@
 {
-    "_comment": "Copy this file to management.json and update all example.com domains and client IDs",
+    "_comment": "Copy this file to management.json and update all example.com domains, client IDs, and API token",
     "Stuns": [
         {
             "Proto": "udp",
@@ -7,7 +7,7 @@
         }
     ],
     "Relay": {
-        "Addresses": ["rels://netbird.example.com:443"],
+        "Addresses": ["rels://netbird.example.com:443/relay"],
         "CredentialsTTL": "24h",
         "Secret": "your-relay-secret-here"
     },
@@ -21,7 +21,12 @@
         "OIDCConfigEndpoint": "https://auth.example.com/.well-known/openid-configuration"
     },
     "IdpManagerConfig": {
-        "ManagerType": "none"
+        "ManagerType": "pocketid",
+        "ClientID": "netbird",
+        "Extra": {
+            "ManagementEndpoint": "https://auth.example.com",
+            "ApiToken": "your-pocketid-api-token-here"
+        }
     },
     "DeviceAuthorizationFlow": {
         "Provider": "none"
@@ -30,8 +35,8 @@
         "ProviderConfig": {
             "Audience": "your-pocketid-client-id",
             "ClientID": "your-pocketid-client-id",
-            "Scope": "openid profile email offline_access",
-            "RedirectURLs": ["http://localhost:53000/", "http://localhost:54000/"]
+            "Scope": "openid profile email groups offline_access",
+            "RedirectURLs": ["http://localhost:53000", "http://localhost:54000"]
         }
     }
 }
