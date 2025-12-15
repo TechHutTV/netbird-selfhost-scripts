@@ -116,6 +116,188 @@ generate_secret() {
     openssl rand -base64 32 | tr -d '=+/' | cut -c1-32
 }
 
+# -----------------------------------------------------------------------------
+# Package Manager Detection
+# -----------------------------------------------------------------------------
+
+detect_package_manager() {
+    if command -v apt-get &> /dev/null; then
+        PKG_MANAGER="apt"
+        PKG_INSTALL="sudo apt-get install -y"
+        PKG_UPDATE="sudo apt-get update"
+    elif command -v dnf &> /dev/null; then
+        PKG_MANAGER="dnf"
+        PKG_INSTALL="sudo dnf install -y"
+        PKG_UPDATE="sudo dnf check-update || true"
+    elif command -v yum &> /dev/null; then
+        PKG_MANAGER="yum"
+        PKG_INSTALL="sudo yum install -y"
+        PKG_UPDATE="sudo yum check-update || true"
+    elif command -v pacman &> /dev/null; then
+        PKG_MANAGER="pacman"
+        PKG_INSTALL="sudo pacman -S --noconfirm"
+        PKG_UPDATE="sudo pacman -Sy"
+    elif command -v apk &> /dev/null; then
+        PKG_MANAGER="apk"
+        PKG_INSTALL="sudo apk add"
+        PKG_UPDATE="sudo apk update"
+    elif command -v zypper &> /dev/null; then
+        PKG_MANAGER="zypper"
+        PKG_INSTALL="sudo zypper install -y"
+        PKG_UPDATE="sudo zypper refresh"
+    else
+        PKG_MANAGER=""
+        PKG_INSTALL=""
+        PKG_UPDATE=""
+    fi
+}
+
+# -----------------------------------------------------------------------------
+# Prerequisite Installation Functions
+# -----------------------------------------------------------------------------
+
+install_docker() {
+    print_step "Installing Docker..."
+
+    if [[ "$PKG_MANAGER" == "apt" ]]; then
+        # Install Docker using official script for Debian/Ubuntu
+        print_info "Using Docker's official installation script..."
+        curl -fsSL https://get.docker.com | sudo sh
+
+        # Add current user to docker group
+        if [[ -n "$USER" ]] && [[ "$USER" != "root" ]]; then
+            sudo usermod -aG docker "$USER"
+            print_warning "Added $USER to docker group. You may need to log out and back in."
+        fi
+    elif [[ "$PKG_MANAGER" == "dnf" ]] || [[ "$PKG_MANAGER" == "yum" ]]; then
+        # Fedora/RHEL/CentOS
+        sudo $PKG_MANAGER remove -y docker docker-client docker-client-latest docker-common docker-latest docker-latest-logrotate docker-logrotate docker-engine 2>/dev/null || true
+        sudo $PKG_INSTALL dnf-plugins-core 2>/dev/null || sudo $PKG_INSTALL yum-utils
+        sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo 2>/dev/null || \
+            sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+        sudo $PKG_INSTALL docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+        sudo systemctl start docker
+        sudo systemctl enable docker
+
+        if [[ -n "$USER" ]] && [[ "$USER" != "root" ]]; then
+            sudo usermod -aG docker "$USER"
+        fi
+    elif [[ "$PKG_MANAGER" == "pacman" ]]; then
+        # Arch Linux
+        sudo $PKG_INSTALL docker docker-compose
+        sudo systemctl start docker
+        sudo systemctl enable docker
+
+        if [[ -n "$USER" ]] && [[ "$USER" != "root" ]]; then
+            sudo usermod -aG docker "$USER"
+        fi
+    elif [[ "$PKG_MANAGER" == "apk" ]]; then
+        # Alpine
+        sudo $PKG_INSTALL docker docker-compose
+        sudo rc-update add docker boot
+        sudo service docker start
+    elif [[ "$PKG_MANAGER" == "zypper" ]]; then
+        # openSUSE
+        sudo $PKG_INSTALL docker docker-compose
+        sudo systemctl start docker
+        sudo systemctl enable docker
+
+        if [[ -n "$USER" ]] && [[ "$USER" != "root" ]]; then
+            sudo usermod -aG docker "$USER"
+        fi
+    else
+        print_error "Could not determine how to install Docker on this system."
+        print_info "Please install Docker manually: https://docs.docker.com/engine/install/"
+        return 1
+    fi
+
+    # Verify installation
+    if command -v docker &> /dev/null; then
+        print_success "Docker installed successfully"
+        return 0
+    else
+        print_error "Docker installation failed"
+        return 1
+    fi
+}
+
+install_curl() {
+    print_step "Installing curl..."
+
+    if [[ -z "$PKG_MANAGER" ]]; then
+        print_error "Could not determine package manager"
+        return 1
+    fi
+
+    $PKG_UPDATE
+    $PKG_INSTALL curl
+
+    if command -v curl &> /dev/null; then
+        print_success "curl installed successfully"
+        return 0
+    else
+        print_error "curl installation failed"
+        return 1
+    fi
+}
+
+install_openssl() {
+    print_step "Installing openssl..."
+
+    if [[ -z "$PKG_MANAGER" ]]; then
+        print_error "Could not determine package manager"
+        return 1
+    fi
+
+    $PKG_UPDATE
+    $PKG_INSTALL openssl
+
+    if command -v openssl &> /dev/null; then
+        print_success "openssl installed successfully"
+        return 0
+    else
+        print_error "openssl installation failed"
+        return 1
+    fi
+}
+
+install_jq() {
+    print_step "Installing jq..."
+
+    if [[ -z "$PKG_MANAGER" ]]; then
+        print_error "Could not determine package manager"
+        return 1
+    fi
+
+    $PKG_UPDATE
+    $PKG_INSTALL jq
+
+    if command -v jq &> /dev/null; then
+        print_success "jq installed successfully"
+        return 0
+    else
+        print_error "jq installation failed"
+        return 1
+    fi
+}
+
+offer_install_prereq() {
+    local prereq="$1"
+    local install_func="install_$prereq"
+
+    echo ""
+    if prompt_yes_no "Would you like to install $prereq now?" "y"; then
+        if $install_func; then
+            return 0
+        else
+            return 1
+        fi
+    else
+        print_info "Skipping $prereq installation"
+        return 1
+    fi
+}
+
 check_command() {
     if command -v "$1" &> /dev/null; then
         print_success "$1 is installed"
@@ -171,30 +353,97 @@ validate_domain() {
 check_prerequisites() {
     print_section "Checking Prerequisites"
 
-    local all_good=true
+    # Detect package manager first for potential installations
+    detect_package_manager
 
-    check_command "docker" || all_good=false
-    check_docker_compose || all_good=false
-    check_command "curl" || all_good=false
-    check_command "openssl" || all_good=false
+    local all_good=true
+    local missing_prereqs=()
+    local docker_user_added=false
+
+    # Check Docker
+    if ! check_command "docker"; then
+        missing_prereqs+=("docker")
+        if [[ -n "$PKG_MANAGER" ]]; then
+            if offer_install_prereq "docker"; then
+                docker_user_added=true
+            else
+                all_good=false
+            fi
+        else
+            all_good=false
+        fi
+    fi
+
+    # Check Docker Compose
+    if ! check_docker_compose; then
+        # Docker Compose is usually installed with Docker now
+        if command -v docker &> /dev/null; then
+            print_warning "Docker is installed but Docker Compose is not available"
+            print_info "Docker Compose should be installed with Docker. Try reinstalling Docker."
+        fi
+        all_good=false
+    fi
+
+    # Check curl
+    if ! check_command "curl"; then
+        if [[ -n "$PKG_MANAGER" ]]; then
+            if ! offer_install_prereq "curl"; then
+                all_good=false
+            fi
+        else
+            all_good=false
+        fi
+    fi
+
+    # Check openssl
+    if ! check_command "openssl"; then
+        if [[ -n "$PKG_MANAGER" ]]; then
+            if ! offer_install_prereq "openssl"; then
+                all_good=false
+            fi
+        else
+            all_good=false
+        fi
+    fi
 
     # jq is optional but helpful
     if ! check_command "jq"; then
         print_warning "jq is optional but recommended for JSON validation"
+        if [[ -n "$PKG_MANAGER" ]]; then
+            if prompt_yes_no "Would you like to install jq? (recommended)" "y"; then
+                install_jq || print_warning "jq installation failed, continuing anyway"
+            fi
+        fi
     fi
 
     if [[ "$all_good" == "false" ]]; then
         echo ""
-        print_error "Please install missing prerequisites and try again."
+        print_error "Some required prerequisites are missing."
         echo ""
-        echo "Install Docker: https://docs.docker.com/engine/install/"
-        echo "Install curl: sudo apt install curl (Debian/Ubuntu)"
-        echo "Install openssl: sudo apt install openssl (Debian/Ubuntu)"
+        if [[ -z "$PKG_MANAGER" ]]; then
+            print_info "Could not detect your package manager for automatic installation."
+            echo ""
+        fi
+        echo "Manual installation instructions:"
+        echo "  Docker: https://docs.docker.com/engine/install/"
+        echo "  curl: sudo apt install curl (Debian/Ubuntu) or equivalent"
+        echo "  openssl: sudo apt install openssl (Debian/Ubuntu) or equivalent"
         exit 1
     fi
 
     echo ""
     print_success "All prerequisites are met!"
+
+    # Warn user if they were added to docker group
+    if [[ "$docker_user_added" == "true" ]]; then
+        echo ""
+        print_warning "You were added to the docker group."
+        print_warning "Please log out and back in for this to take effect, then run this script again."
+        echo ""
+        if ! prompt_yes_no "Continue anyway? (may require 'sudo' for docker commands)" "n"; then
+            exit 0
+        fi
+    fi
 }
 
 # -----------------------------------------------------------------------------
