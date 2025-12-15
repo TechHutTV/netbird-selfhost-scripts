@@ -1,0 +1,89 @@
+# =============================================================================
+# Zitadel Identity Provider - Docker Compose Configuration
+# =============================================================================
+# This file is included when deploying Zitadel as part of the NetBird stack.
+# For existing Zitadel instances, this file is not needed.
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Zitadel - Identity Provider
+  # ---------------------------------------------------------------------------
+  zitadel:
+    image: ghcr.io/zitadel/zitadel:latest
+    container_name: zitadel
+    restart: unless-stopped
+    networks:
+      - netbird
+    ports:
+      - "8080:8080"  # HTTP (proxy through NPM for HTTPS)
+    command: start-from-init --masterkeyFromEnv --tlsMode disabled
+    environment:
+      - ZITADEL_DATABASE_POSTGRES_HOST=zitadel-db
+      - ZITADEL_DATABASE_POSTGRES_PORT=5432
+      - ZITADEL_DATABASE_POSTGRES_DATABASE=zitadel
+      - ZITADEL_DATABASE_POSTGRES_USER=zitadel
+      - ZITADEL_DATABASE_POSTGRES_PASSWORD=${ZITADEL_DB_PASSWORD:-zitadel-db-password}
+      - ZITADEL_DATABASE_POSTGRES_ADMIN_EXISTINGDATABASE=zitadel
+      - ZITADEL_DATABASE_POSTGRES_ADMIN_USER=zitadel
+      - ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD=${ZITADEL_DB_PASSWORD:-zitadel-db-password}
+      - ZITADEL_MASTERKEY=${ZITADEL_MASTERKEY:-MustBeAtLeast32CharactersLongKey!}
+      - ZITADEL_EXTERNALSECURE=true
+      - ZITADEL_EXTERNALDOMAIN=${ZITADEL_DOMAIN:-zitadel.example.com}
+      - ZITADEL_EXTERNALPORT=443
+      - ZITADEL_FIRSTINSTANCE_ORG_NAME=NetBird
+      - ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME=admin
+      - ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD=${ZITADEL_ADMIN_PASSWORD:-Admin123!}
+    depends_on:
+      zitadel-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/zitadel", "ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "2"
+
+  # ---------------------------------------------------------------------------
+  # Zitadel PostgreSQL Database
+  # ---------------------------------------------------------------------------
+  zitadel-db:
+    image: postgres:16-alpine
+    container_name: zitadel-db
+    restart: unless-stopped
+    networks:
+      - netbird
+    environment:
+      - POSTGRES_USER=zitadel
+      - POSTGRES_PASSWORD=${ZITADEL_DB_PASSWORD:-zitadel-db-password}
+      - POSTGRES_DB=zitadel
+    volumes:
+      - zitadel_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zitadel -d zitadel"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "2"
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  zitadel_db_data:
+
+# =============================================================================
+# Networks (uses the same network as NetBird)
+# =============================================================================
+networks:
+  netbird:
+    external: true
