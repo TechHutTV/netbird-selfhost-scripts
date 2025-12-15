@@ -1,0 +1,164 @@
+services:
+  # =============================================================================
+  # NGINX Proxy Manager - Reverse Proxy with SSL
+  # =============================================================================
+  nginx-proxy-manager:
+    image: jc21/nginx-proxy-manager:latest
+    container_name: nginx-proxy-manager
+    restart: unless-stopped
+    networks:
+      - netbird
+    ports:
+      - "80:80"
+      - "443:443"
+      - "81:81"  # Admin UI
+    volumes:
+      - npm_data:/data
+      - npm_letsencrypt:/etc/letsencrypt
+    environment:
+      - TZ=UTC
+    healthcheck:
+      test: ["CMD", "/usr/bin/check-health"]
+      interval: 10s
+      timeout: 3s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "2"
+
+  # =============================================================================
+  # PocketID - OIDC Identity Provider
+  # =============================================================================
+  pocketid:
+    image: stonith404/pocket-id:latest
+    container_name: pocketid
+    restart: unless-stopped
+    networks:
+      - netbird
+    ports:
+      - "3000:80"  # Exposed for initial setup, route through NPM after
+    volumes:
+      - pocketid_data:/app/backend/data
+    environment:
+      - PUBLIC_APP_URL=${POCKETID_URL:-https://auth.example.com}
+      - TRUST_PROXY=true
+      - MAXMIND_LICENSE_KEY=${MAXMIND_LICENSE_KEY:-}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "2"
+
+  # =============================================================================
+  # NetBird Dashboard - Web UI
+  # =============================================================================
+  dashboard:
+    image: netbirdio/dashboard:latest
+    container_name: netbird-dashboard
+    restart: unless-stopped
+    networks:
+      - netbird
+    env_file:
+      - ./dashboard.env
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "2"
+
+  # =============================================================================
+  # NetBird Signal Server
+  # =============================================================================
+  signal:
+    image: netbirdio/signal:latest
+    container_name: netbird-signal
+    restart: unless-stopped
+    networks:
+      - netbird
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "2"
+
+  # =============================================================================
+  # NetBird Relay Server
+  # =============================================================================
+  relay:
+    image: netbirdio/relay:latest
+    container_name: netbird-relay
+    restart: unless-stopped
+    networks:
+      - netbird
+    env_file:
+      - ./relay.env
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "2"
+
+  # =============================================================================
+  # NetBird Management Server
+  # =============================================================================
+  management:
+    image: netbirdio/management:latest
+    container_name: netbird-management
+    restart: unless-stopped
+    networks:
+      - netbird
+    volumes:
+      - netbird_management:/var/lib/netbird
+      - ./management.json:/etc/netbird/management.json
+    command:
+      - "--port"
+      - "80"
+      - "--log-file"
+      - "console"
+      - "--log-level"
+      - "info"
+      - "--disable-anonymous-metrics=false"
+      - "--single-account-mode-domain=netbird.selfhosted"
+      - "--dns-domain=netbird.selfhosted"
+      - "--idp-sign-key-refresh-enabled"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "2"
+
+  # =============================================================================
+  # Coturn - TURN/STUN Server for NAT Traversal
+  # =============================================================================
+  coturn:
+    image: coturn/coturn:latest
+    container_name: netbird-coturn
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./turnserver.conf:/etc/turnserver.conf:ro
+    command:
+      - -c
+      - /etc/turnserver.conf
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "2"
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  npm_data:
+  npm_letsencrypt:
+  pocketid_data:
+  netbird_management:
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  netbird:
+    driver: bridge

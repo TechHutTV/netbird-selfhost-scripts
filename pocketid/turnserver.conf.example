@@ -1,0 +1,38 @@
+# =============================================================================
+# Coturn TURN Server - Configuration
+# =============================================================================
+# Copy this file to turnserver.conf and update the values for your deployment
+# Usage: cp turnserver.conf.example turnserver.conf
+# =============================================================================
+
+# Listening ports
+listening-port=3478
+tls-listening-port=5349
+
+# Port range for relay connections
+# These ports must be open in your firewall (UDP)
+min-port=49152
+max-port=65535
+
+# Enable fingerprint in TURN messages
+fingerprint
+
+# Long-term credential mechanism
+lt-cred-mech
+
+# TURN user credentials
+# Format: user=username:password
+# Generate password with: openssl rand -base64 32
+# IMPORTANT: This password must match TURN_PASSWORD in .env
+user=netbird:your-turn-password-here
+
+# Realm (use your NetBird domain)
+realm=netbird.example.com
+
+# Logging
+log-file=stdout
+
+# Additional settings
+no-software-attribute
+pidfile="/var/tmp/turnserver.pid"
+no-cli
