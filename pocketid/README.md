@@ -2,6 +2,30 @@
 
 This guide walks you through deploying NetBird self-hosted with [PocketID](https://github.com/stonith404/pocket-id) as the identity provider and NGINX Proxy Manager for SSL/reverse proxy.
 
+## File Structure
+
+```
+pocketid/
+├── compose.yaml        # Docker Compose stack definition
+├── .env                # Main environment variables (domains, secrets)
+├── dashboard.env       # NetBird Dashboard configuration (OIDC settings)
+├── relay.env           # NetBird Relay server configuration
+├── management.json     # NetBird Management server configuration
+├── turnserver.conf     # Coturn TURN/STUN server configuration
+└── README.md           # This documentation
+```
+
+### Configuration Files Overview
+
+| File | Purpose | Key Settings |
+|------|---------|--------------|
+| `.env` | Main environment variables | Domain names, TURN password, relay secret |
+| `dashboard.env` | Dashboard web UI config | OIDC client ID, auth endpoints |
+| `relay.env` | Relay server config | Exposed address, auth secret |
+| `management.json` | Management API config | STUN/TURN servers, OIDC, IDP integration |
+| `turnserver.conf` | Coturn config | Ports, credentials, realm |
+| `compose.yaml` | Docker services | All container definitions |
+
 ## Overview
 
 | Component | Purpose |
@@ -32,23 +56,43 @@ Create the following DNS A records pointing to your server IP:
 
 ## Setup Instructions
 
-### Step 1: Clone and Configure
+### Step 1: Clone and Navigate
 
 ```bash
-# Navigate to the pocketid directory
-cd pocketid
-
-# Copy all example configuration files
-cp .env.example .env
-cp dashboard.env.example dashboard.env
-cp relay.env.example relay.env
-cp turnserver.conf.example turnserver.conf
-cp management.json.example management.json
+# Clone the repository
+git clone https://github.com/TechHutTV/netbird-selfhost-scripts.git
+cd netbird-selfhost-scripts/pocketid
 ```
 
-### Step 2: Update Configuration Files
+### Step 2: Generate Secrets
 
-Update the following configuration files with your domain and secrets:
+Generate secure passwords for TURN and relay authentication:
+
+```bash
+# Generate TURN password
+openssl rand -base64 32
+
+# Generate relay auth secret (use a different value)
+openssl rand -base64 32
+```
+
+### Step 3: Update Configuration Files
+
+All configuration files are ready to use - just update the placeholder values with your domain and secrets.
+
+**Quick Setup (Optional):** Use `sed` to replace all placeholder domains at once:
+
+```bash
+# Set your domains
+NETBIRD_DOMAIN="netbird.yourdomain.com"
+POCKETID_DOMAIN="auth.yourdomain.com"
+
+# Replace in all config files
+sed -i "s/netbird.example.com/$NETBIRD_DOMAIN/g" .env dashboard.env relay.env management.json turnserver.conf
+sed -i "s/auth.example.com/$POCKETID_DOMAIN/g" .env dashboard.env management.json
+```
+
+Then manually update the secrets (TURN password, relay secret) - these must be unique values.
 
 #### `.env` (Main environment variables)
 
@@ -97,75 +141,42 @@ NB_AUTH_SECRET=your-relay-secret-here
 
 #### `turnserver.conf`
 
+Update the credentials and realm:
+
 ```conf
-listening-port=3478
-tls-listening-port=5349
-min-port=49152
-max-port=65535
-fingerprint
-lt-cred-mech
+# Update the password (must match TURN_PASSWORD in .env)
 user=netbird:your-turn-password-here
+
+# Update the realm to your domain
 realm=netbird.example.com
-log-file=stdout
-no-software-attribute
-pidfile="/var/tmp/turnserver.pid"
-no-cli
 ```
 
 #### `management.json`
 
-```json
-{
-    "Stuns": [
-        {
-            "Proto": "udp",
-            "URI": "stun:netbird.example.com:3478"
-        }
-    ],
-    "Relay": {
-        "Addresses": ["rels://netbird.example.com:443/relay"],
-        "CredentialsTTL": "24h",
-        "Secret": "your-relay-secret-here"
-    },
-    "Signal": {
-        "Proto": "https",
-        "URI": "netbird.example.com:443"
-    },
-    "HttpConfig": {
-        "AuthIssuer": "https://auth.example.com",
-        "AuthAudience": "your-pocketid-client-id",
-        "OIDCConfigEndpoint": "https://auth.example.com/.well-known/openid-configuration"
-    },
-    "IdpManagerConfig": {
-        "ManagerType": "pocketid",
-        "ClientID": "netbird",
-        "Extra": {
-            "ManagementEndpoint": "https://auth.example.com",
-            "ApiToken": "your-pocketid-api-token-here"
-        }
-    },
-    "DeviceAuthorizationFlow": {
-        "Provider": "none"
-    },
-    "PKCEAuthorizationFlow": {
-        "ProviderConfig": {
-            "Audience": "your-pocketid-client-id",
-            "ClientID": "your-pocketid-client-id",
-            "Scope": "openid profile email groups offline_access",
-            "RedirectURLs": ["http://localhost:53000", "http://localhost:54000"]
-        }
-    }
-}
-```
+Update the following values (search and replace `example.com` with your domain):
 
-### Step 3: Start the Stack
+| Field | Update to |
+|-------|-----------|
+| `Stuns[0].URI` | `stun:YOUR_NETBIRD_DOMAIN:3478` |
+| `Relay.Addresses` | `rels://YOUR_NETBIRD_DOMAIN:443/relay` |
+| `Relay.Secret` | Your relay auth secret (same as `.env`) |
+| `Signal.URI` | `YOUR_NETBIRD_DOMAIN:443` |
+| `HttpConfig.AuthIssuer` | Your PocketID URL |
+| `HttpConfig.AuthAudience` | PocketID Client ID (after Step 5) |
+| `HttpConfig.OIDCConfigEndpoint` | `YOUR_POCKETID_URL/.well-known/openid-configuration` |
+| `IdpManagerConfig.Extra.ManagementEndpoint` | Your PocketID URL |
+| `IdpManagerConfig.Extra.ApiToken` | PocketID API Key (after Step 5) |
+| `PKCEAuthorizationFlow.ProviderConfig.Audience` | PocketID Client ID |
+| `PKCEAuthorizationFlow.ProviderConfig.ClientID` | PocketID Client ID |
+
+### Step 4: Start the Stack
 
 ```bash
 # Start all services
 docker compose up -d
 ```
 
-### Step 4: Configure NGINX Proxy Manager
+### Step 5: Configure NGINX Proxy Manager
 
 1. Access NGINX Proxy Manager at `http://your-server-ip:81`
 2. Default login: `admin@example.com` / `changeme`
@@ -235,7 +246,7 @@ location /management.ManagementService/ {
 }
 ```
 
-### Step 5: Configure PocketID
+### Step 6: Configure PocketID
 
 1. Access PocketID at `https://auth.example.com`
 2. Complete the initial setup wizard
@@ -266,7 +277,7 @@ location /management.ManagementService/ {
    - **Expires At**: Pick a date in the future
 4. Click **Save** and copy the **API Key**
 
-### Step 6: Update Configuration with PocketID Client ID and API Key
+### Step 7: Update Configuration with PocketID Client ID and API Key
 
 Update `dashboard.env`:
 ```bash
@@ -279,7 +290,7 @@ Update `management.json`:
 - Replace `your-pocketid-api-token-here` with the API Key from PocketID
 - Update the `ManagementEndpoint` in `IdpManagerConfig.Extra` to your PocketID URL
 
-### Step 7: Restart Services
+### Step 8: Restart Services
 
 ```bash
 docker compose restart dashboard management
@@ -326,6 +337,39 @@ Ensure the following ports are open:
 | 5349 | TCP | TURN over TLS |
 | 49152-65535 | UDP | TURN relay ports |
 
+For UFW (Ubuntu), run:
+```bash
+sudo ufw allow 80/tcp && sudo ufw allow 443/tcp && sudo ufw allow 3478/udp && \
+sudo ufw allow 5349/tcp && sudo ufw allow 49152:65535/udp && sudo ufw reload
+```
+
+## Data Persistence
+
+Docker volumes store persistent data:
+
+| Volume | Purpose | Backup Priority |
+|--------|---------|-----------------|
+| `npm_data` | NGINX Proxy Manager config | Medium |
+| `npm_letsencrypt` | SSL certificates | Medium |
+| `pocketid_data` | PocketID users, OIDC clients | High |
+| `netbird_management` | NetBird peers, networks, ACLs | High |
+
+### Backup
+
+```bash
+# Stop services
+docker compose stop
+
+# Backup volumes
+docker run --rm -v pocketid_pocketid_data:/data -v $(pwd):/backup alpine \
+    tar czf /backup/pocketid-backup.tar.gz -C /data .
+docker run --rm -v pocketid_netbird_management:/data -v $(pwd):/backup alpine \
+    tar czf /backup/netbird-backup.tar.gz -C /data .
+
+# Restart services
+docker compose start
+```
+
 ## Troubleshooting
 
 ### Check service logs
@@ -355,23 +399,71 @@ docker compose logs -f pocketid
 - Check `management.json` syntax with `jq . management.json`
 - Verify the OIDC configuration endpoint is accessible
 
-## File Structure
+## Architecture Diagram
 
 ```
-pocketid/
-├── compose.yaml              # Docker Compose configuration
-├── README.md                 # This file
-├── .env.example              # Example environment variables
-├── .env                      # Environment variables (create from example)
-├── dashboard.env.example     # Example NetBird Dashboard configuration
-├── dashboard.env             # NetBird Dashboard configuration (create from example)
-├── relay.env.example         # Example NetBird Relay configuration
-├── relay.env                 # NetBird Relay configuration (create from example)
-├── turnserver.conf.example   # Example Coturn TURN server configuration
-├── turnserver.conf           # Coturn TURN server configuration (create from example)
-├── management.json.example   # Example NetBird Management configuration
-└── management.json           # NetBird Management configuration (create from example)
+                                    ┌─────────────────────────────────────────┐
+                                    │              Internet                    │
+                                    └─────────────────┬───────────────────────┘
+                                                      │
+                              ┌───────────────────────┼───────────────────────┐
+                              │                       │                       │
+                           TCP 80               TCP 443               UDP 3478
+                           TCP 81              TCP 33080              UDP 49152-65535
+                              │                       │                       │
+                              ▼                       ▼                       ▼
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                              NGINX Proxy Manager (:80, :443, :81)                       │
+│                                                                                          │
+│   Routes:                                                                                │
+│   • auth.example.com     → pocketid:80                                                  │
+│   • netbird.example.com/ → dashboard:80                                                 │
+│   • /api                 → management:80                                                │
+│   • /relay               → relay:80                                                     │
+│   • /signalexchange.*    → signal:80 (gRPC)                                            │
+│   • /management.*        → management:80 (gRPC)                                         │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+                              │
+         ┌────────────────────┼────────────────────┬──────────────────────┐
+         │                    │                    │                      │
+         ▼                    ▼                    ▼                      ▼
+┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
+│    PocketID     │  │    Dashboard    │  │   Management    │  │     Signal      │
+│    (IDP)        │  │    (Web UI)     │  │    (API)        │  │   (Signaling)   │
+│    :80          │  │    :80          │  │    :80          │  │    :80          │
+└─────────────────┘  └─────────────────┘  └─────────────────┘  └─────────────────┘
+                                                   │
+                                                   ▼
+                                          ┌─────────────────┐
+                                          │     Relay       │
+                                          │  (Fallback)     │
+                                          │     :80         │
+                                          └─────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                                 Coturn (host network)                                   │
+│                                                                                          │
+│   UDP 3478 (STUN)  •  TCP 5349 (TURN TLS)  •  UDP 49152-65535 (relay ports)            │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
 ```
+
+## Configuration Relationships
+
+Understanding how the configuration files relate to each other:
+
+```
+.env
+ ├── NETBIRD_DOMAIN ──────────────► Used in: dashboard.env, relay.env, management.json, turnserver.conf
+ ├── POCKETID_URL ────────────────► Used in: dashboard.env, management.json
+ ├── TURN_PASSWORD ───────────────► Must match: turnserver.conf (user=netbird:PASSWORD)
+ └── RELAY_AUTH_SECRET ───────────► Must match: relay.env (NB_AUTH_SECRET)
+                                              management.json (Relay.Secret)
+```
+
+**Important:** Ensure these values are synchronized across files:
+- `TURN_PASSWORD` in `.env` must match the password in `turnserver.conf`
+- `RELAY_AUTH_SECRET` in `.env` must match `NB_AUTH_SECRET` in `relay.env` AND `Relay.Secret` in `management.json`
+- PocketID Client ID must be the same in `dashboard.env` (AUTH_CLIENT_ID, AUTH_AUDIENCE) and `management.json` (HttpConfig.AuthAudience, PKCEAuthorizationFlow.ProviderConfig)
 
 ## References
 
