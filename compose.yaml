@@ -31,7 +31,7 @@ services:
   # PocketID - OIDC Identity Provider
   # =============================================================================
   pocketid:
-    image: stonith404/pocket-id:latest
+    image: ghcr.io/pocket-id/pocket-id:v1
     container_name: pocketid
     restart: unless-stopped
     networks:
