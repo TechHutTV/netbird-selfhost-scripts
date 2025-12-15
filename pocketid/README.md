@@ -2,10 +2,47 @@
 
 This guide walks you through deploying NetBird self-hosted with [PocketID](https://github.com/stonith404/pocket-id) as the identity provider and NGINX Proxy Manager for SSL/reverse proxy.
 
-## File Structure
+## Quick Start (Recommended)
+
+The easiest way to get started is using our interactive setup script:
+
+```bash
+# Clone the repository
+git clone https://github.com/TechHutTV/netbird-selfhost-scripts.git
+cd netbird-selfhost-scripts/pocketid
+
+# Run the interactive setup
+./setup.sh
+```
+
+The setup script will:
+- Check prerequisites (Docker, Docker Compose, etc.)
+- Walk you through domain and PocketID configuration
+- Generate secure secrets automatically
+- Update all configuration files
+- Optionally start the services
+
+### Setup Script Options
+
+```bash
+./setup.sh                    # Interactive setup wizard
+./setup.sh --update-pocketid  # Update PocketID credentials after initial setup
+./setup.sh --reset            # Reset all configuration to defaults
+./setup.sh --check            # Check prerequisites only
+./setup.sh --help             # Show help
+```
+
+---
+
+## Manual Setup
+
+If you prefer to configure everything manually, follow the steps below.
+
+### File Structure
 
 ```
 pocketid/
+├── setup.sh            # Interactive setup script (recommended)
 ├── compose.yaml        # Docker Compose stack definition
 ├── .env                # Main environment variables (domains, secrets)
 ├── dashboard.env       # NetBird Dashboard configuration (OIDC settings)
@@ -15,10 +52,11 @@ pocketid/
 └── README.md           # This documentation
 ```
 
-### Configuration Files Overview
+#### Configuration Files Overview
 
 | File | Purpose | Key Settings |
 |------|---------|--------------|
+| `setup.sh` | Interactive setup wizard | Automates all configuration |
 | `.env` | Main environment variables | Domain names, TURN password, relay secret |
 | `dashboard.env` | Dashboard web UI config | OIDC client ID, auth endpoints |
 | `relay.env` | Relay server config | Exposed address, auth secret |
@@ -26,7 +64,7 @@ pocketid/
 | `turnserver.conf` | Coturn config | Ports, credentials, realm |
 | `compose.yaml` | Docker services | All container definitions |
 
-## Overview
+### Overview
 
 | Component | Purpose |
 |-----------|---------|
@@ -38,13 +76,13 @@ pocketid/
 | NetBird Relay | Relay server for fallback connectivity |
 | Coturn | TURN/STUN server for NAT traversal |
 
-## Prerequisites
+### Prerequisites
 
 - Docker and Docker Compose installed
 - A domain name with DNS configured (3 subdomains recommended)
 - Ports 80, 443, 3478 (UDP), and 49152-65535 (UDP) available
 
-## DNS Configuration
+### DNS Configuration
 
 Create the following DNS A records pointing to your server IP:
 
@@ -54,9 +92,9 @@ Create the following DNS A records pointing to your server IP:
 | `auth.example.com` | PocketID authentication |
 | `npm.example.com` | NGINX Proxy Manager admin (optional) |
 
-## Setup Instructions
+### Setup Instructions
 
-### Step 1: Clone and Navigate
+#### Step 1: Clone and Navigate
 
 ```bash
 # Clone the repository
@@ -64,7 +102,7 @@ git clone https://github.com/TechHutTV/netbird-selfhost-scripts.git
 cd netbird-selfhost-scripts/pocketid
 ```
 
-### Step 2: Generate Secrets
+#### Step 2: Generate Secrets
 
 Generate secure passwords for TURN and relay authentication:
 
@@ -76,7 +114,7 @@ openssl rand -base64 32
 openssl rand -base64 32
 ```
 
-### Step 3: Update Configuration Files
+#### Step 3: Update Configuration Files
 
 All configuration files are ready to use - just update the placeholder values with your domain and secrets.
 
@@ -169,14 +207,14 @@ Update the following values (search and replace `example.com` with your domain):
 | `PKCEAuthorizationFlow.ProviderConfig.Audience` | PocketID Client ID |
 | `PKCEAuthorizationFlow.ProviderConfig.ClientID` | PocketID Client ID |
 
-### Step 4: Start the Stack
+#### Step 4: Start the Stack
 
 ```bash
 # Start all services
 docker compose up -d
 ```
 
-### Step 5: Configure NGINX Proxy Manager
+#### Step 5: Configure NGINX Proxy Manager
 
 1. Access NGINX Proxy Manager at `http://your-server-ip:81`
 2. Default login: `admin@example.com` / `changeme`
@@ -246,7 +284,7 @@ location /management.ManagementService/ {
 }
 ```
 
-### Step 6: Configure PocketID
+#### Step 6: Configure PocketID
 
 1. Access PocketID at `https://auth.example.com`
 2. Complete the initial setup wizard
@@ -277,7 +315,9 @@ location /management.ManagementService/ {
    - **Expires At**: Pick a date in the future
 4. Click **Save** and copy the **API Key**
 
-### Step 7: Update Configuration with PocketID Client ID and API Key
+#### Step 7: Update Configuration with PocketID Client ID and API Key
+
+> **Tip:** You can also use `./setup.sh --update-pocketid` to update these credentials interactively.
 
 Update `dashboard.env`:
 ```bash
@@ -290,18 +330,20 @@ Update `management.json`:
 - Replace `your-pocketid-api-token-here` with the API Key from PocketID
 - Update the `ManagementEndpoint` in `IdpManagerConfig.Extra` to your PocketID URL
 
-### Step 8: Restart Services
+#### Step 8: Restart Services
 
 ```bash
 docker compose restart dashboard management
 ```
 
-## Verification
+### Verification
 
 1. Access `https://netbird.example.com`
 2. Click **Login** - you should be redirected to PocketID
 3. Login with your PocketID credentials
 4. You should be redirected back to the NetBird dashboard
+
+---
 
 ## Connecting Clients
 
