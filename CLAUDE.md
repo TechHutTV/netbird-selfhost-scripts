@@ -1,6 +1,6 @@
 # NetBird Self-Hosted Deployment Scripts
 
-This repository contains deployment scripts to make NetBird self-hosted installation easy across various configurations including different identity providers (IDPs) and reverse proxy systems.
+This repository contains deployment scripts to make NetBird self-hosted installation easy with PocketID as the identity provider and NGINX as the reverse proxy.
 
 ## NetBird Architecture Overview
 
@@ -130,28 +130,20 @@ sudo ufw status
 - **Peers can't connect?** Verify both TCP and UDP on port 33080 are allowed
 - **Let's Encrypt failing?** Confirm port 80/tcp is open and not blocked by cloud firewall
 
-## Identity Providers
+## Identity Provider
 
-NetBird uses OpenID Connect (OIDC) for authentication. The following providers are supported:
+NetBird uses OpenID Connect (OIDC) for authentication. This deployment uses **PocketID** as the identity provider.
 
-### Self-Hosted IDPs
+### PocketID
 
 | Provider | Description | `NETBIRD_MGMT_IDP` Value |
 |----------|-------------|--------------------------|
-| **Zitadel** | Open-source identity infrastructure. Multi-tenancy, FIDO2/passkeys, SCIM 2.0. Recommended for quickstart. | `zitadel` |
-| **Keycloak** | Popular open-source IAM. SSO, social login, user federation, fine-grained authorization. | `keycloak` |
-| **Authentik** | Flexible, security-focused. Self-hosted alternative to Okta/Auth0. | `authentik` |
 | **PocketID** | Simplified identity management. Lightweight and easy to deploy. | `pocketid` |
 
-### Managed IDPs
-
-| Provider | Description | `NETBIRD_MGMT_IDP` Value |
-|----------|-------------|--------------------------|
-| **Auth0** | Flexible drop-in authentication service. Extensive customization. | `auth0` |
-| **Microsoft Entra ID** (Azure AD) | Enterprise identity with Microsoft ecosystem integration. | `azure` |
-| **Okta** | Enterprise IAM with thousands of pre-built integrations. | `okta` |
-| **Google Workspace** | Identity management through Google's cloud infrastructure. | `google` |
-| **JumpCloud** | Cloud directory platform with unified identity/device management. | `jumpcloud` |
+PocketID is a lightweight, self-hosted identity provider that integrates seamlessly with NetBird. It provides:
+- Simple OIDC authentication
+- User and group management
+- API key support for management integration
 
 ## Core Configuration Variables
 
@@ -162,24 +154,22 @@ NetBird uses OpenID Connect (OIDC) for authentication. The following providers a
 NETBIRD_DOMAIN=""                    # Your NetBird domain (e.g., netbird.example.com)
 NETBIRD_LETSENCRYPT_EMAIL=""         # Email for Let's Encrypt certificates
 
-# OIDC Authentication (Common to all IDPs)
-NETBIRD_AUTH_OIDC_CONFIGURATION_ENDPOINT=""  # IDP's .well-known/openid-configuration URL
+# OIDC Authentication (PocketID)
+NETBIRD_AUTH_OIDC_CONFIGURATION_ENDPOINT=""  # PocketID's .well-known/openid-configuration URL
 NETBIRD_AUTH_CLIENT_ID=""                     # OAuth Client ID
-NETBIRD_AUTH_AUDIENCE=""                      # Token audience (often same as Client ID)
-NETBIRD_AUTH_SUPPORTED_SCOPES=""              # OAuth scopes (usually: openid profile email offline_access)
-NETBIRD_USE_AUTH0="false"                     # Set to "true" only for Auth0
+NETBIRD_AUTH_AUDIENCE=""                      # Token audience (same as Client ID)
+NETBIRD_AUTH_SUPPORTED_SCOPES=""              # OAuth scopes: openid profile email groups offline_access
+NETBIRD_USE_AUTH0="false"                     # Always false for PocketID
 
-# Device Authentication (Interactive SSO Login)
-NETBIRD_AUTH_DEVICE_AUTH_PROVIDER=""          # "hosted", "none", or specific provider
-NETBIRD_AUTH_DEVICE_AUTH_CLIENT_ID=""         # Device auth client ID
-NETBIRD_AUTH_DEVICE_AUTH_AUDIENCE=""          # Device auth audience
+# Device Authentication
+NETBIRD_AUTH_DEVICE_AUTH_PROVIDER="none"      # PocketID uses "none"
 
 # IDP Management Integration
-NETBIRD_MGMT_IDP=""                           # IDP type (zitadel, keycloak, authentik, etc.)
-NETBIRD_IDP_MGMT_CLIENT_ID=""                 # Backend client ID for user management
-NETBIRD_IDP_MGMT_CLIENT_SECRET=""             # Backend client secret
+NETBIRD_MGMT_IDP="pocketid"                   # IDP type
+NETBIRD_IDP_MGMT_CLIENT_ID=""                 # PocketID client ID
+NETBIRD_IDP_MGMT_API_TOKEN=""                 # PocketID API token
 
-# Reverse Proxy Configuration (when not using built-in Let's Encrypt)
+# Reverse Proxy Configuration
 NETBIRD_DISABLE_LETSENCRYPT="false"           # Set to "true" for custom reverse proxy
 NETBIRD_MGMT_API_PORT="443"                   # Management API port
 NETBIRD_SIGNAL_PORT="443"                     # Signal service port
@@ -187,10 +177,6 @@ NETBIRD_SIGNAL_PORT="443"                     # Signal service port
 # Database Configuration
 NETBIRD_STORE_CONFIG_ENGINE="sqlite"          # "sqlite" or "postgres"
 ```
-
-### IDP-Specific Variables
-
-Each IDP requires additional specific variables. See `ref/selfhosted/identity-providers/` for details.
 
 ## Database Storage
 
@@ -209,18 +195,17 @@ NETBIRD_STORE_ENGINE_POSTGRES_DSN="host=<PG_HOST> user=<PG_USER> password=<PG_PA
 
 ## Reverse Proxy Configuration
 
-When running NetBird behind a reverse proxy, the following endpoints must be configured:
+This deployment uses NGINX as the reverse proxy with automatic SSL via Let's Encrypt. The following endpoints are configured:
 
 | Endpoint | Protocol | Target Service |
 |----------|----------|----------------|
 | `/` | HTTP | dashboard:80 |
 | `/signalexchange.SignalExchange/` | gRPC (HTTP/2) | signal:80 |
 | `/ws-proxy/signal` | WebSocket | signal:80 |
-| `/api` | HTTP | management:443 |
-| `/management.ManagementService/` | gRPC (HTTP/2) | management:443 |
-| `/ws-proxy/management` | WebSocket | management:443 |
+| `/api` | HTTP | management:80 |
+| `/management.ManagementService/` | gRPC (HTTP/2) | management:80 |
+| `/ws-proxy/management` | WebSocket | management:80 |
 | `/relay` | WebSocket | relay:33080 |
-| `:33080` (UDP) | QUIC | relay:33080 (L4 proxy or direct) |
 
 **Important:** gRPC requires HTTP/2 protocol support in the reverse proxy.
 
@@ -234,195 +219,71 @@ When running NetBird behind a reverse proxy, the following endpoints must be con
 netbird-selfhost-scripts/
 ├── CLAUDE.md                      # This file
 ├── README.md                      # User documentation
-├── install.sh                     # Main interactive installer
-├── lib/                           # Shared library functions
-│   ├── common.sh                  # Common utilities (logging, validation)
-│   ├── docker.sh                  # Docker/compose utilities
-│   ├── ssl.sh                     # SSL/TLS utilities
-│   └── network.sh                 # Network utilities (port checking, DNS)
-├── idp/                           # Identity Provider configurations
-│   ├── zitadel/
-│   │   ├── setup.sh               # Zitadel-specific setup
-│   │   ├── configure.sh           # Generate Zitadel config
-│   │   └── templates/             # Docker-compose and config templates
-│   ├── keycloak/
-│   │   ├── setup.sh
-│   │   ├── configure.sh
-│   │   └── templates/
-│   ├── authentik/
-│   │   ├── setup.sh
-│   │   ├── configure.sh
-│   │   └── templates/
-│   ├── pocketid/
-│   │   ├── setup.sh
-│   │   ├── configure.sh
-│   │   └── templates/
-│   ├── auth0/
-│   │   ├── configure.sh           # Managed IDP - config only
-│   │   └── README.md              # Manual setup instructions
-│   ├── azure-ad/
-│   │   ├── configure.sh
-│   │   └── README.md
-│   ├── okta/
-│   │   ├── configure.sh
-│   │   └── README.md
-│   ├── google-workspace/
-│   │   ├── configure.sh
-│   │   └── README.md
-│   └── jumpcloud/
-│       ├── configure.sh
-│       └── README.md
-├── reverse-proxy/                 # Reverse proxy configurations
-│   ├── none/                      # Built-in Caddy with Let's Encrypt
-│   │   └── docker-compose.yml.tmpl
-│   ├── nginx-proxy-manager/
-│   │   ├── setup.sh
-│   │   ├── docker-compose.yml.tmpl
-│   │   └── README.md              # NPM configuration instructions
-│   ├── traefik/
-│   │   ├── setup.sh
-│   │   ├── docker-compose.yml.tmpl
-│   │   ├── traefik.yml.tmpl
-│   │   └── README.md
-│   ├── caddy/                     # Standalone Caddy (custom config)
-│   │   ├── setup.sh
-│   │   ├── docker-compose.yml.tmpl
-│   │   ├── Caddyfile.tmpl
-│   │   └── README.md
-│   ├── nginx/                     # Standard Nginx
-│   │   ├── setup.sh
-│   │   ├── docker-compose.yml.tmpl
-│   │   ├── nginx.conf.tmpl
-│   │   └── README.md
-│   ├── haproxy/
-│   │   ├── setup.sh
-│   │   ├── docker-compose.yml.tmpl
-│   │   ├── haproxy.cfg.tmpl
-│   │   └── README.md
-│   └── cloudflare-tunnel/
-│       ├── setup.sh
-│       ├── docker-compose.yml.tmpl
-│       └── README.md
-├── database/                      # Database configurations
-│   ├── sqlite/                    # Default SQLite
-│   │   └── README.md
-│   └── postgres/
-│       ├── setup.sh
-│       ├── docker-compose.yml.tmpl
-│       ├── migrate.sh             # SQLite to Postgres migration
-│       └── README.md
-├── templates/                     # Base templates
-│   ├── setup.env.tmpl             # Base environment template
-│   ├── management.json.tmpl       # Management config template
-│   ├── turnserver.conf.tmpl       # Coturn config template
-│   └── docker-compose.base.yml    # Base docker-compose
-├── tools/                         # Utility scripts
-│   ├── backup.sh                  # Backup script
-│   ├── restore.sh                 # Restore script
-│   ├── upgrade.sh                 # Upgrade script
-│   ├── health-check.sh            # Health check script
-│   └── troubleshoot.sh            # Troubleshooting utilities
-└── examples/                      # Complete example configurations
-    ├── zitadel-builtin/           # Zitadel with built-in Caddy
-    ├── keycloak-traefik/          # Keycloak with Traefik
-    ├── authentik-npm/             # Authentik with Nginx Proxy Manager
-    └── auth0-cloudflare/          # Auth0 with Cloudflare Tunnel
+├── setup.sh                       # Interactive setup script
+├── compose.yaml                   # Docker Compose stack definition
+├── .env                           # Main environment variables
+├── dashboard.env                  # Dashboard configuration
+├── relay.env                      # Relay server configuration
+├── management.json                # Management server configuration
+├── turnserver.conf                # Coturn TURN/STUN configuration
+├── idp/                           # Identity Provider utilities
+│   └── common.sh                  # PocketID utility functions
+├── nginx/                         # NGINX configuration
+│   ├── nginx.conf                 # Main NGINX config
+│   ├── netbird.conf.template      # Site configuration template
+│   └── init-ssl.sh                # SSL initialization script
+└── reverse-proxy/                 # Additional reverse proxy options
+    └── nginx/
+        ├── setup.sh
+        └── README.md
 ```
 
-## Main Installer Flow (install.sh)
+## Main Installer Flow (setup.sh)
 
 ```
 1. Welcome & Prerequisites Check
    ├── Check OS compatibility (Linux)
    ├── Check Docker & Docker Compose
-   ├── Check jq, curl installed
-   └── Check required ports available
+   ├── Check curl, openssl, certbot installed
+   └── Offer to install missing prerequisites
 
 2. Domain Configuration
-   ├── Get domain name
+   ├── Get NetBird domain name
+   ├── Get PocketID domain name
    ├── Validate DNS resolution
-   └── Get Let's Encrypt email (if applicable)
+   └── Get Let's Encrypt email
 
-3. Identity Provider Selection
-   ├── Self-hosted Options:
-   │   ├── Zitadel (Recommended - All-in-one)
-   │   ├── Keycloak
-   │   ├── Authentik
-   │   └── PocketID
-   └── Managed Options:
-       ├── Auth0
-       ├── Microsoft Entra ID
-       ├── Okta
-       ├── Google Workspace
-       └── JumpCloud
+3. PocketID Configuration
+   ├── Existing PocketID: Get URL, Client ID, API Token
+   └── New PocketID: Will be deployed with stack
 
-4. Reverse Proxy Selection
-   ├── Built-in (Caddy + Let's Encrypt) - Default
-   ├── Nginx Proxy Manager
-   ├── Traefik
-   ├── Caddy (Standalone)
-   ├── Nginx
-   ├── HAProxy
-   └── Cloudflare Tunnel
+4. Secret Generation
+   ├── Generate TURN password
+   └── Generate relay auth secret
 
-5. Database Selection
-   ├── SQLite (Default)
-   └── PostgreSQL
+5. Configuration Generation
+   ├── Generate .env
+   ├── Generate dashboard.env
+   ├── Generate relay.env
+   ├── Generate management.json
+   ├── Generate turnserver.conf
+   └── Generate NGINX configuration
 
-6. Advanced Options
-   ├── Single account mode (default: enabled)
-   ├── Custom TURN ports
-   ├── Geolocation database
-   └── User deletion from IDP
+6. SSL Certificate Acquisition
+   ├── Stop any services on port 80
+   ├── Run certbot for NetBird domain
+   └── Run certbot for PocketID domain
 
-7. Configuration Generation
-   ├── Generate setup.env
-   ├── Run configure.sh
-   └── Generate docker-compose.yml
-
-8. Deployment
+7. Deployment
    ├── Pull Docker images
    ├── Start services
-   └── Health check
+   └── Display service status
 
-9. Post-Installation
-   ├── Display admin credentials (if applicable)
+8. Post-Installation
+   ├── Display PocketID setup instructions
    ├── Display dashboard URL
-   └── Next steps instructions
+   └── Display client connection commands
 ```
-
-## Reverse Proxy Implementations
-
-### Nginx Proxy Manager
-- Popular GUI-based reverse proxy
-- Requires: Proxy host configuration with WebSocket support
-- Special considerations: gRPC requires custom Nginx config snippets
-
-### Traefik
-- Cloud-native reverse proxy with automatic service discovery
-- Docker labels for configuration
-- Built-in Let's Encrypt support
-- Native HTTP/2 and gRPC support
-
-### Caddy (Standalone)
-- Simple configuration syntax
-- Automatic HTTPS
-- Native HTTP/2 and gRPC support
-
-### Nginx
-- Traditional reverse proxy
-- Requires manual configuration for gRPC (grpc_pass)
-- Stream module needed for UDP relay
-
-### HAProxy
-- High-performance load balancer
-- HTTP/2 and gRPC support via h2 backend
-- UDP mode for QUIC relay
-
-### Cloudflare Tunnel
-- Zero-trust access without opening ports
-- Cloudflared container
-- Limited: UDP/QUIC relay may need direct exposure
 
 ## Key Implementation Notes
 
@@ -439,10 +300,8 @@ netbird-selfhost-scripts/
 
 ### QUIC/UDP Relay
 - Cannot be proxied through HTTP reverse proxies
-- Options:
-  1. Direct UDP exposure on port 33080
-  2. L4 (transport layer) proxy supporting UDP
-  3. Rely on WebSocket relay only (set appropriate config)
+- Coturn handles UDP directly on host network
+- Port 3478 (STUN/TURN) and 49152-65535 (relay) must be open
 
 ### Browser Client Support (v0.59.0+)
 - Requires WebSocket proxy endpoints:
@@ -452,7 +311,7 @@ netbird-selfhost-scripts/
 ## Testing Checklist
 
 - [ ] Dashboard accessible via HTTPS
-- [ ] Login with IDP works
+- [ ] Login with PocketID works
 - [ ] Peer registration works
 - [ ] Peer-to-peer connection establishes
 - [ ] TURN relay works (test with blocked UDP)
