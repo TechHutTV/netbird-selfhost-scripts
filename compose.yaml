@@ -70,17 +70,18 @@ services:
     networks:
       - netbird
     volumes:
-      - pocketid_data:/app/backend/data
+      - pocketid_data:/app/data
     environment:
-      - PUBLIC_APP_URL=${POCKETID_URL:-https://auth.example.com}
+      - APP_URL=${POCKETID_URL:-https://auth.example.com}
       - TRUST_PROXY=true
+      - ENCRYPTION_KEY=${POCKETID_ENCRYPTION_KEY:-}
       - MAXMIND_LICENSE_KEY=${MAXMIND_LICENSE_KEY:-}
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:80/health"]
-      interval: 10s
+      test: ["/app/pocket-id", "healthcheck"]
+      interval: 1m30s
       timeout: 5s
-      retries: 5
-      start_period: 30s
+      retries: 2
+      start_period: 10s
     logging:
       driver: "json-file"
       options:
