@@ -687,11 +687,11 @@ upstream signal_grpc {
 }
 
 upstream relay {
-    server relay:80;
+    server relay:33080;
 }
 
 upstream pocketid {
-    server pocketid:80;
+    server pocketid:1411;
 }
 
 # HTTP -> HTTPS redirect for NetBird domain
