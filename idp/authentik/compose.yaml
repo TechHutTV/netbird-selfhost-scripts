@@ -19,8 +19,8 @@ services:
     networks:
       - netbird
     ports:
-      - "9000:9000"  # HTTP (proxy through NPM for HTTPS)
-      - "9443:9443"  # HTTPS (optional, if not using NPM)
+      - "9000:9000"  # HTTP (proxy through NGINX for HTTPS)
+      - "9443:9443"  # HTTPS (optional, if not using NGINX proxy)
     command: server
     environment:
       - AUTHENTIK_SECRET_KEY=${AUTHENTIK_SECRET_KEY:-changeme-generate-a-long-random-string}

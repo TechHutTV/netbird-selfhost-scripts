@@ -16,7 +16,7 @@ services:
     networks:
       - netbird
     ports:
-      - "8080:8080"  # HTTP (proxy through NPM for HTTPS)
+      - "8080:8080"  # HTTP (proxy through NGINX for HTTPS)
     command: start-from-init --masterkeyFromEnv --tlsMode disabled
     environment:
       - ZITADEL_DATABASE_POSTGRES_HOST=zitadel-db

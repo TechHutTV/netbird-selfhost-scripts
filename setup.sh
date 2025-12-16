@@ -27,41 +27,41 @@ NC='\033[0m' # No Color
 
 print_banner() {
     echo -e "${CYAN}"
-    echo "╔═══════════════════════════════════════════════════════════════════════════╗"
-    echo "║                                                                           ║"
-    echo "║       ${BOLD}NetBird Self-Hosted with PocketID${NC}${CYAN}                                 ║"
-    echo "║       Interactive Setup Script                                            ║"
-    echo "║                                                                           ║"
-    echo "╚═══════════════════════════════════════════════════════════════════════════╝"
+    echo "========================================================================"
+    echo ""
+    echo "       NetBird Self-Hosted with PocketID"
+    echo "       Interactive Setup Script"
+    echo ""
+    echo "========================================================================"
     echo -e "${NC}"
 }
 
 print_section() {
     echo ""
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${BLUE}------------------------------------------------------------------------${NC}"
     echo -e "${BOLD}${BLUE}  $1${NC}"
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${BLUE}------------------------------------------------------------------------${NC}"
     echo ""
 }
 
 print_step() {
-    echo -e "${GREEN}▶${NC} $1"
+    echo -e "${GREEN}>${NC} $1"
 }
 
 print_info() {
-    echo -e "${CYAN}ℹ${NC} $1"
+    echo -e "${CYAN}i${NC} $1"
 }
 
 print_warning() {
-    echo -e "${YELLOW}⚠${NC} $1"
+    echo -e "${YELLOW}!${NC} $1"
 }
 
 print_error() {
-    echo -e "${RED}✖${NC} $1"
+    echo -e "${RED}x${NC} $1"
 }
 
 print_success() {
-    echo -e "${GREEN}✔${NC} $1"
+    echo -e "${GREEN}+${NC} $1"
 }
 
 prompt_yes_no() {
@@ -281,6 +281,37 @@ install_jq() {
     fi
 }
 
+install_certbot() {
+    print_step "Installing certbot..."
+
+    if [[ -z "$PKG_MANAGER" ]]; then
+        print_error "Could not determine package manager"
+        return 1
+    fi
+
+    $PKG_UPDATE
+
+    if [[ "$PKG_MANAGER" == "apt" ]]; then
+        $PKG_INSTALL certbot
+    elif [[ "$PKG_MANAGER" == "dnf" ]] || [[ "$PKG_MANAGER" == "yum" ]]; then
+        $PKG_INSTALL certbot
+    elif [[ "$PKG_MANAGER" == "pacman" ]]; then
+        $PKG_INSTALL certbot
+    elif [[ "$PKG_MANAGER" == "apk" ]]; then
+        $PKG_INSTALL certbot
+    elif [[ "$PKG_MANAGER" == "zypper" ]]; then
+        $PKG_INSTALL certbot
+    fi
+
+    if command -v certbot &> /dev/null; then
+        print_success "certbot installed successfully"
+        return 0
+    else
+        print_error "certbot installation failed"
+        return 1
+    fi
+}
+
 offer_install_prereq() {
     local prereq="$1"
     local install_func="install_$prereq"
@@ -346,6 +377,21 @@ validate_domain() {
     return 0
 }
 
+validate_email() {
+    local email="$1"
+
+    if [[ -z "$email" ]]; then
+        return 1
+    fi
+
+    # Basic email validation
+    if [[ ! "$email" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]]; then
+        return 1
+    fi
+
+    return 0
+}
+
 # -----------------------------------------------------------------------------
 # Prerequisites Check
 # -----------------------------------------------------------------------------
@@ -406,6 +452,15 @@ check_prerequisites() {
         fi
     fi
 
+    # Check certbot
+    if ! check_command "certbot"; then
+        if [[ -n "$PKG_MANAGER" ]]; then
+            if ! offer_install_prereq "certbot"; then
+                print_warning "certbot not installed - SSL certificates will need manual setup"
+            fi
+        fi
+    fi
+
     # jq is optional but helpful
     if ! check_command "jq"; then
         print_warning "jq is optional but recommended for JSON validation"
@@ -428,6 +483,7 @@ check_prerequisites() {
         echo "  Docker: https://docs.docker.com/engine/install/"
         echo "  curl: sudo apt install curl (Debian/Ubuntu) or equivalent"
         echo "  openssl: sudo apt install openssl (Debian/Ubuntu) or equivalent"
+        echo "  certbot: sudo apt install certbot (Debian/Ubuntu) or equivalent"
         exit 1
     fi
 
@@ -470,6 +526,23 @@ collect_configuration() {
 
     echo ""
 
+    # Let's Encrypt Email
+    echo -e "${BOLD}SSL Certificate Configuration${NC}"
+    echo ""
+    print_info "An email address is required for Let's Encrypt SSL certificates."
+    print_info "You'll receive expiration notices at this address."
+    echo ""
+
+    while true; do
+        prompt_input "Enter your email for Let's Encrypt" "" "LETSENCRYPT_EMAIL"
+        if validate_email "$LETSENCRYPT_EMAIL"; then
+            break
+        fi
+        print_error "Please enter a valid email address"
+    done
+
+    echo ""
+
     # PocketID Configuration
     echo -e "${BOLD}PocketID Identity Provider${NC}"
     echo ""
@@ -483,6 +556,9 @@ collect_configuration() {
 
         # Remove trailing slash if present
         POCKETID_URL="${POCKETID_URL%/}"
+
+        # Extract domain from URL
+        POCKETID_DOMAIN=$(echo "$POCKETID_URL" | sed 's|https://||' | sed 's|http://||' | cut -d'/' -f1)
 
         echo ""
         print_info "You'll need to create an OIDC client and API key in PocketID."
@@ -514,47 +590,21 @@ collect_configuration() {
 
     echo ""
 
-    # NGINX Proxy Manager Configuration
-    echo -e "${BOLD}Reverse Proxy Configuration${NC}"
-    echo ""
-
-    if prompt_yes_no "Do you have an existing NGINX Proxy Manager instance?" "n"; then
-        EXISTING_NPM=true
-        print_info "You'll configure your existing NGINX Proxy Manager to proxy NetBird."
-        echo ""
-        print_warning "Make sure your NPM can reach the Docker network for this stack."
-        DEPLOY_NPM=false
-    else
-        EXISTING_NPM=false
-        if prompt_yes_no "Deploy NGINX Proxy Manager as part of this stack?" "y"; then
-            DEPLOY_NPM=true
-            print_info "NGINX Proxy Manager will be deployed on ports 80, 443, and 81 (admin)."
-        else
-            DEPLOY_NPM=false
-            print_warning "You'll need to configure your own reverse proxy."
-            print_info "See the README for proxy configuration requirements."
-        fi
-    fi
-
-    echo ""
-
     # Summary
     print_section "Configuration Summary"
 
-    echo -e "  ${BOLD}NetBird Domain:${NC}    $NETBIRD_DOMAIN"
-    echo -e "  ${BOLD}PocketID URL:${NC}      $POCKETID_URL"
+    echo -e "  ${BOLD}NetBird Domain:${NC}      $NETBIRD_DOMAIN"
+    echo -e "  ${BOLD}PocketID Domain:${NC}     $POCKETID_DOMAIN"
+    echo -e "  ${BOLD}PocketID URL:${NC}        $POCKETID_URL"
+    echo -e "  ${BOLD}Let's Encrypt Email:${NC} $LETSENCRYPT_EMAIL"
     if [[ "$EXISTING_POCKETID" == "true" ]]; then
-        echo -e "  ${BOLD}PocketID:${NC}          Using existing instance"
-        echo -e "  ${BOLD}Client ID:${NC}         $POCKETID_CLIENT_ID"
-        echo -e "  ${BOLD}API Token:${NC}         ********"
+        echo -e "  ${BOLD}PocketID:${NC}            Using existing instance"
+        echo -e "  ${BOLD}Client ID:${NC}           $POCKETID_CLIENT_ID"
+        echo -e "  ${BOLD}API Token:${NC}           ********"
     else
-        echo -e "  ${BOLD}PocketID:${NC}          Will be deployed"
+        echo -e "  ${BOLD}PocketID:${NC}            Will be deployed"
     fi
-    if [[ "$DEPLOY_NPM" == "true" ]]; then
-        echo -e "  ${BOLD}NGINX Proxy Mgr:${NC}   Will be deployed"
-    else
-        echo -e "  ${BOLD}NGINX Proxy Mgr:${NC}   External/manual"
-    fi
+    echo -e "  ${BOLD}Reverse Proxy:${NC}       NGINX with automatic SSL"
 
     echo ""
 
@@ -581,6 +631,397 @@ generate_secrets() {
 
     echo ""
     print_success "All secrets generated securely!"
+}
+
+# -----------------------------------------------------------------------------
+# Generate NGINX Configuration
+# -----------------------------------------------------------------------------
+
+generate_nginx_config() {
+    print_section "Generating NGINX Configuration"
+
+    # Create nginx directories
+    print_step "Creating nginx configuration directories..."
+    mkdir -p nginx/conf.d
+
+    # Generate the site configuration from template
+    print_step "Generating nginx site configuration..."
+
+    cat > nginx/conf.d/netbird.conf << EOF
+# =============================================================================
+# NetBird NGINX Configuration
+# =============================================================================
+# Generated by setup.sh on $(date)
+# =============================================================================
+
+# Upstream definitions
+upstream dashboard {
+    server dashboard:80;
+}
+
+upstream management_http {
+    server management:80;
+}
+
+upstream management_grpc {
+    server management:80;
+}
+
+upstream signal_grpc {
+    server signal:80;
+}
+
+upstream relay {
+    server relay:80;
+}
+
+upstream pocketid {
+    server pocketid:80;
+}
+
+# HTTP -> HTTPS redirect for NetBird domain
+server {
+    listen 80;
+    listen [::]:80;
+    server_name $NETBIRD_DOMAIN;
+
+    # Let's Encrypt challenge
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://\$host\$request_uri;
+    }
+}
+
+# HTTP -> HTTPS redirect for PocketID domain
+server {
+    listen 80;
+    listen [::]:80;
+    server_name $POCKETID_DOMAIN;
+
+    # Let's Encrypt challenge
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://\$host\$request_uri;
+    }
+}
+
+# =============================================================================
+# NetBird Main Domain - HTTPS
+# =============================================================================
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name $NETBIRD_DOMAIN;
+
+    # SSL Configuration
+    ssl_certificate /etc/letsencrypt/live/$NETBIRD_DOMAIN/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/$NETBIRD_DOMAIN/privkey.pem;
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:SSL:50m;
+    ssl_session_tickets off;
+
+    # Modern SSL configuration
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+
+    # HSTS
+    add_header Strict-Transport-Security "max-age=63072000" always;
+
+    # -------------------------------------------------------------------------
+    # Signal Server - gRPC
+    # -------------------------------------------------------------------------
+    location /signalexchange.SignalExchange/ {
+        grpc_pass grpc://signal_grpc;
+        grpc_set_header Host \$host;
+        grpc_set_header X-Real-IP \$remote_addr;
+        grpc_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        grpc_set_header X-Forwarded-Proto \$scheme;
+
+        # gRPC timeouts
+        grpc_read_timeout 3600s;
+        grpc_send_timeout 3600s;
+    }
+
+    # -------------------------------------------------------------------------
+    # Signal Server - WebSocket Proxy (for browser clients)
+    # -------------------------------------------------------------------------
+    location /ws-proxy/signal {
+        proxy_pass http://signal_grpc/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+
+        # WebSocket timeouts
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
+    # -------------------------------------------------------------------------
+    # Management Server - gRPC
+    # -------------------------------------------------------------------------
+    location /management.ManagementService/ {
+        grpc_pass grpc://management_grpc;
+        grpc_set_header Host \$host;
+        grpc_set_header X-Real-IP \$remote_addr;
+        grpc_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        grpc_set_header X-Forwarded-Proto \$scheme;
+
+        # gRPC timeouts
+        grpc_read_timeout 3600s;
+        grpc_send_timeout 3600s;
+    }
+
+    # -------------------------------------------------------------------------
+    # Management Server - WebSocket Proxy (for browser clients)
+    # -------------------------------------------------------------------------
+    location /ws-proxy/management {
+        proxy_pass http://management_http/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+
+        # WebSocket timeouts
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
+    # -------------------------------------------------------------------------
+    # Management Server - HTTP API
+    # -------------------------------------------------------------------------
+    location /api {
+        proxy_pass http://management_http;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+
+        # Disable buffering for streaming
+        proxy_buffering off;
+        proxy_request_buffering off;
+    }
+
+    # -------------------------------------------------------------------------
+    # Relay Server - WebSocket
+    # -------------------------------------------------------------------------
+    location /relay {
+        proxy_pass http://relay;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+
+        # WebSocket timeouts
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
+    # -------------------------------------------------------------------------
+    # Dashboard - Default location
+    # -------------------------------------------------------------------------
+    location / {
+        proxy_pass http://dashboard;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+
+# =============================================================================
+# PocketID Domain - HTTPS
+# =============================================================================
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name $POCKETID_DOMAIN;
+
+    # SSL Configuration
+    ssl_certificate /etc/letsencrypt/live/$POCKETID_DOMAIN/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/$POCKETID_DOMAIN/privkey.pem;
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:SSL:50m;
+    ssl_session_tickets off;
+
+    # Modern SSL configuration
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+
+    # HSTS
+    add_header Strict-Transport-Security "max-age=63072000" always;
+
+    # Proxy all requests to PocketID
+    location / {
+        proxy_pass http://pocketid;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+
+        # WebSocket support (if needed)
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+EOF
+
+    print_success "nginx site configuration generated"
+
+    # Copy main nginx.conf if it doesn't exist
+    if [[ ! -f "nginx/nginx.conf" ]]; then
+        print_step "Creating main nginx.conf..."
+        cat > nginx/nginx.conf << 'EOF'
+# =============================================================================
+# NGINX Main Configuration for NetBird
+# =============================================================================
+
+user nginx;
+worker_processes auto;
+error_log /var/log/nginx/error.log warn;
+pid /var/run/nginx.pid;
+
+events {
+    worker_connections 1024;
+    multi_accept on;
+}
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+
+    # Logging format
+    log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                    '$status $body_bytes_sent "$http_referer" '
+                    '"$http_user_agent" "$http_x_forwarded_for"';
+
+    access_log /var/log/nginx/access.log main;
+
+    # Performance settings
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+    keepalive_timeout 65;
+    types_hash_max_size 2048;
+
+    # Gzip compression
+    gzip on;
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_comp_level 6;
+    gzip_types text/plain text/css text/xml application/json application/javascript application/xml+rss application/atom+xml image/svg+xml;
+
+    # Client body size (for file uploads if needed)
+    client_max_body_size 100M;
+
+    # Include server configurations
+    include /etc/nginx/conf.d/*.conf;
+}
+EOF
+        print_success "main nginx.conf created"
+    fi
+
+    echo ""
+    print_success "NGINX configuration generated!"
+}
+
+# -----------------------------------------------------------------------------
+# Obtain SSL Certificates
+# -----------------------------------------------------------------------------
+
+obtain_ssl_certificates() {
+    print_section "Obtaining SSL Certificates"
+
+    if ! command -v certbot &> /dev/null; then
+        print_warning "certbot is not installed. Skipping automatic SSL certificate generation."
+        print_info "You'll need to obtain SSL certificates manually before starting the services."
+        return 1
+    fi
+
+    print_info "This will obtain SSL certificates from Let's Encrypt."
+    print_info "Make sure your DNS records are properly configured and ports 80/443 are available."
+    echo ""
+
+    if ! prompt_yes_no "Obtain SSL certificates now?" "y"; then
+        print_info "Skipping SSL certificate generation."
+        print_info "You'll need to run: sudo certbot certonly --standalone -d $NETBIRD_DOMAIN -d $POCKETID_DOMAIN"
+        return 0
+    fi
+
+    # Check if port 80 is available
+    if lsof -i :80 &> /dev/null; then
+        print_warning "Port 80 is in use. Stopping any services using it..."
+        $DOCKER_COMPOSE_CMD down 2>/dev/null || true
+        sudo systemctl stop nginx 2>/dev/null || true
+        sudo systemctl stop apache2 2>/dev/null || true
+        sleep 2
+    fi
+
+    # Obtain certificates
+    print_step "Obtaining certificate for $NETBIRD_DOMAIN..."
+    if sudo certbot certonly \
+        --standalone \
+        --non-interactive \
+        --agree-tos \
+        --email "$LETSENCRYPT_EMAIL" \
+        --domain "$NETBIRD_DOMAIN"; then
+        print_success "Certificate obtained for $NETBIRD_DOMAIN"
+    else
+        print_error "Failed to obtain certificate for $NETBIRD_DOMAIN"
+        print_info "Make sure DNS is configured and port 80 is accessible"
+        return 1
+    fi
+
+    # Only get PocketID cert if different domain
+    if [[ "$POCKETID_DOMAIN" != "$NETBIRD_DOMAIN" ]]; then
+        print_step "Obtaining certificate for $POCKETID_DOMAIN..."
+        if sudo certbot certonly \
+            --standalone \
+            --non-interactive \
+            --agree-tos \
+            --email "$LETSENCRYPT_EMAIL" \
+            --domain "$POCKETID_DOMAIN"; then
+            print_success "Certificate obtained for $POCKETID_DOMAIN"
+        else
+            print_error "Failed to obtain certificate for $POCKETID_DOMAIN"
+            print_info "Make sure DNS is configured and port 80 is accessible"
+            return 1
+        fi
+    fi
+
+    # Copy certificates to Docker-accessible location
+    print_step "Setting up certificates for Docker..."
+
+    # Create certificates directory
+    mkdir -p certs
+
+    # Copy certificates (using sudo since certbot creates root-owned files)
+    sudo cp -rL /etc/letsencrypt/live certs/ 2>/dev/null || true
+    sudo cp -rL /etc/letsencrypt/archive certs/ 2>/dev/null || true
+    sudo chown -R $USER:$USER certs/ 2>/dev/null || true
+
+    echo ""
+    print_success "SSL certificates obtained successfully!"
 }
 
 # -----------------------------------------------------------------------------
@@ -611,7 +1052,9 @@ update_configuration_files() {
 
 # Domain Configuration
 NETBIRD_DOMAIN=$NETBIRD_DOMAIN
+POCKETID_DOMAIN=$POCKETID_DOMAIN
 POCKETID_URL=$POCKETID_URL
+LETSENCRYPT_EMAIL=$LETSENCRYPT_EMAIL
 
 # Secrets (auto-generated)
 TURN_PASSWORD=$TURN_PASSWORD
@@ -762,31 +1205,32 @@ EOF
 EOF
     print_success "management.json updated"
 
-    # Update compose.yaml if not deploying NPM
-    if [[ "$DEPLOY_NPM" == "false" ]]; then
-        print_step "Updating compose.yaml (removing NGINX Proxy Manager)..."
-
-        # Create a version without NPM
-        if [[ -f "compose.yaml" ]]; then
-            # Comment out the nginx-proxy-manager service
-            sed -i.bak '/nginx-proxy-manager:/,/logging:/{ s/^/#/; }' compose.yaml 2>/dev/null || true
-            print_warning "NGINX Proxy Manager service commented out in compose.yaml"
-            print_info "You'll need to configure your own reverse proxy"
-        fi
-    fi
-
     # Handle existing PocketID
     if [[ "$EXISTING_POCKETID" == "true" ]]; then
-        print_step "Updating compose.yaml (removing PocketID service)..."
-
-        if [[ -f "compose.yaml" ]]; then
-            # We'll just note this - don't modify the compose file automatically
-            print_warning "Using external PocketID - you may want to remove the pocketid service from compose.yaml"
-        fi
+        print_warning "Using external PocketID - you may want to remove the pocketid service from compose.yaml"
     fi
 
     echo ""
     print_success "All configuration files updated!"
+}
+
+# -----------------------------------------------------------------------------
+# Update compose.yaml for SSL
+# -----------------------------------------------------------------------------
+
+update_compose_for_ssl() {
+    print_section "Updating Docker Compose Configuration"
+
+    # Check if certificates are in /etc/letsencrypt or local certs directory
+    if [[ -d "/etc/letsencrypt/live/$NETBIRD_DOMAIN" ]]; then
+        print_step "Updating compose.yaml to use system Let's Encrypt certificates..."
+
+        # Update compose.yaml to mount /etc/letsencrypt
+        sed -i 's|letsencrypt_certs:/etc/letsencrypt:ro|/etc/letsencrypt:/etc/letsencrypt:ro|g' compose.yaml
+        print_success "compose.yaml updated to use /etc/letsencrypt"
+    else
+        print_info "Using Docker volume for certificates"
+    fi
 }
 
 # -----------------------------------------------------------------------------
@@ -825,25 +1269,8 @@ start_services() {
 print_next_steps() {
     print_section "Next Steps"
 
-    if [[ "$DEPLOY_NPM" == "true" ]]; then
-        echo -e "${BOLD}1. Configure NGINX Proxy Manager${NC}"
-        echo ""
-        echo "   Access NPM admin panel: http://YOUR_SERVER_IP:81"
-        echo "   Default login: admin@example.com / changeme"
-        echo ""
-        echo "   Create proxy hosts for:"
-        if [[ "$EXISTING_POCKETID" == "false" ]]; then
-            echo "   - $POCKETID_URL -> pocketid:80"
-        fi
-        echo "   - https://$NETBIRD_DOMAIN -> dashboard:80"
-        echo ""
-        echo "   See README.md for detailed NGINX configuration including"
-        echo "   gRPC and WebSocket proxy settings."
-        echo ""
-    fi
-
     if [[ "$EXISTING_POCKETID" == "false" ]]; then
-        echo -e "${BOLD}2. Configure PocketID${NC}"
+        echo -e "${BOLD}1. Configure PocketID${NC}"
         echo ""
         echo "   Access PocketID: $POCKETID_URL"
         echo "   Complete the initial setup wizard."
@@ -861,7 +1288,7 @@ print_next_steps() {
         echo "   Create API Key:"
         echo "   - Name: NetBird Management"
         echo ""
-        echo -e "${BOLD}3. Update Configuration with PocketID Credentials${NC}"
+        echo -e "${BOLD}2. Update Configuration with PocketID Credentials${NC}"
         echo ""
         echo "   Run this script again with --update-pocketid flag, or manually update:"
         echo "   - dashboard.env: AUTH_CLIENT_ID and AUTH_AUDIENCE"
@@ -880,6 +1307,12 @@ print_next_steps() {
     echo -e "${BOLD}Connect Clients${NC}"
     echo ""
     echo "   netbird up --management-url https://$NETBIRD_DOMAIN"
+    echo ""
+
+    echo -e "${BOLD}SSL Certificate Renewal${NC}"
+    echo ""
+    echo "   Certificates will auto-renew via the certbot container."
+    echo "   To manually renew: docker compose exec certbot certbot renew"
     echo ""
 
     echo -e "${BOLD}Troubleshooting${NC}"
@@ -974,9 +1407,10 @@ reset_configuration() {
     print_step "Removing configuration files..."
     rm -f .env dashboard.env relay.env management.json turnserver.conf
     rm -f .env.bak dashboard.env.bak relay.env.bak management.json.bak turnserver.conf.bak
+    rm -rf nginx/conf.d
 
     # Restore from git if possible
-    if command -v git &> /dev/null && [[ -d "../.git" ]]; then
+    if command -v git &> /dev/null && [[ -d ".git" ]]; then
         print_step "Restoring default files from git..."
         git checkout -- .env dashboard.env relay.env management.json turnserver.conf 2>/dev/null || true
     fi
@@ -1066,7 +1500,10 @@ main() {
     check_prerequisites
     collect_configuration
     generate_secrets
+    generate_nginx_config
     update_configuration_files
+    obtain_ssl_certificates
+    update_compose_for_ssl
     start_services
     print_next_steps
 }
