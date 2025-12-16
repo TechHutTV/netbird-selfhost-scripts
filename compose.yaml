@@ -136,6 +136,8 @@ services:
     volumes:
       - netbird_management:/var/lib/netbird
       - ./management.json:/etc/netbird/management.json
+    environment:
+      - NETBIRD_DOMAIN=${NETBIRD_DOMAIN:-netbird.example.com}
     command:
       - "--port"
       - "80"
@@ -144,8 +146,9 @@ services:
       - "--log-level"
       - "info"
       - "--disable-anonymous-metrics=false"
-      - "--single-account-mode-domain=netbird.selfhosted"
-      - "--dns-domain=netbird.selfhosted"
+      - "--single-account-mode-domain=${NETBIRD_DOMAIN:-netbird.example.com}"
+      - "--dns-domain=${NETBIRD_DOMAIN:-netbird.example.com}"
+      # Note: --idp-sign-key-refresh-enabled is primarily for Zitadel but safe for other IDPs
       - "--idp-sign-key-refresh-enabled"
     logging:
       driver: "json-file"
