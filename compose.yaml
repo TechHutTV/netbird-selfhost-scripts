@@ -22,11 +22,16 @@ services:
       - letsencrypt_certs:/etc/letsencrypt:ro
       - certbot_webroot:/var/www/certbot:ro
     depends_on:
-      - dashboard
-      - management
-      - signal
-      - relay
-      - pocketid
+      dashboard:
+        condition: service_started
+      management:
+        condition: service_started
+      signal:
+        condition: service_started
+      relay:
+        condition: service_started
+      pocketid:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "nginx", "-t"]
       interval: 30s
@@ -70,6 +75,12 @@ services:
       - PUBLIC_APP_URL=${POCKETID_URL:-https://auth.example.com}
       - TRUST_PROXY=true
       - MAXMIND_LICENSE_KEY=${MAXMIND_LICENSE_KEY:-}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:80/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     logging:
       driver: "json-file"
       options:
