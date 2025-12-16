@@ -27,7 +27,7 @@ upstream signal_grpc {
 }
 
 upstream relay {
-    server relay:80;
+    server relay:33080;
 }
 
 upstream pocketid {
