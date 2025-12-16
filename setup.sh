@@ -642,12 +642,27 @@ generate_nginx_config() {
 
     # Create nginx directories
     print_step "Creating nginx configuration directories..."
+    mkdir -p nginx
+
+    # Note: The nginx site configuration uses a template file (nginx/netbird.conf.template)
+    # which is processed by Docker's nginx envsubst feature at container startup.
+    # This allows dynamic domain substitution without rebuilding.
+    print_step "Verifying nginx site configuration template exists..."
+
+    if [[ ! -f "nginx/netbird.conf.template" ]]; then
+        print_error "nginx/netbird.conf.template not found!"
+        print_info "Please ensure the template file exists in the nginx directory."
+        exit 1
+    fi
+
+    print_success "nginx site configuration template verified"
+
+    # Generate a backup/reference config with actual values for debugging
+    # This file is NOT used by the Docker container - it's for reference only
+    print_step "Creating reference configuration (for debugging)..."
     mkdir -p nginx/conf.d
 
-    # Generate the site configuration from template
-    print_step "Generating nginx site configuration..."
-
-    cat > nginx/conf.d/netbird.conf << EOF
+    cat > nginx/conf.d/netbird.conf.reference << EOF
 # =============================================================================
 # NetBird NGINX Configuration
 # =============================================================================
@@ -886,7 +901,8 @@ server {
 }
 EOF
 
-    print_success "nginx site configuration generated"
+    print_success "nginx reference configuration generated (nginx/conf.d/netbird.conf.reference)"
+    print_info "Note: The actual config is generated from nginx/netbird.conf.template at container startup"
 
     # Copy main nginx.conf if it doesn't exist
     if [[ ! -f "nginx/nginx.conf" ]]; then
