@@ -11,9 +11,14 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    environment:
+      - NETBIRD_DOMAIN=${NETBIRD_DOMAIN:-netbird.example.com}
+      - POCKETID_DOMAIN=${POCKETID_DOMAIN:-auth.example.com}
+      # Only substitute these specific variables, protecting nginx's $host, $scheme, etc.
+      - NGINX_ENVSUBST_FILTER=^(NETBIRD_DOMAIN|POCKETID_DOMAIN)$$
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/netbird.conf.template:/etc/nginx/templates/netbird.conf.template:ro
       - letsencrypt_certs:/etc/letsencrypt:ro
       - certbot_webroot:/var/www/certbot:ro
     depends_on:
