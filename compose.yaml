@@ -26,6 +26,7 @@ services:
       - management
       - signal
       - relay
+      - pocketid
     healthcheck:
       test: ["CMD", "nginx", "-t"]
       interval: 30s
