@@ -1,30 +1,52 @@
 services:
   # =============================================================================
-  # NGINX Proxy Manager - Reverse Proxy with SSL
+  # NGINX - Reverse Proxy with SSL
   # =============================================================================
-  nginx-proxy-manager:
-    image: jc21/nginx-proxy-manager:latest
-    container_name: nginx-proxy-manager
+  nginx:
+    image: nginx:alpine
+    container_name: nginx
     restart: unless-stopped
     networks:
       - netbird
     ports:
       - "80:80"
       - "443:443"
-      - "81:81"  # Admin UI
     volumes:
-      - npm_data:/data
-      - npm_letsencrypt:/etc/letsencrypt
-    environment:
-      - TZ=UTC
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - letsencrypt_certs:/etc/letsencrypt:ro
+      - certbot_webroot:/var/www/certbot:ro
+    depends_on:
+      - dashboard
+      - management
+      - signal
+      - relay
     healthcheck:
-      test: ["CMD", "/usr/bin/check-health"]
-      interval: 10s
-      timeout: 3s
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     logging:
       driver: "json-file"
       options:
         max-size: "100m"
+        max-file: "2"
+
+  # =============================================================================
+  # Certbot - SSL Certificate Management
+  # =============================================================================
+  certbot:
+    image: certbot/certbot:latest
+    container_name: certbot
+    volumes:
+      - letsencrypt_certs:/etc/letsencrypt
+      - certbot_webroot:/var/www/certbot
+    # Certbot will be run manually or via cron for renewal
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
         max-file: "2"
 
   # =============================================================================
@@ -36,8 +58,6 @@ services:
     restart: unless-stopped
     networks:
       - netbird
-    ports:
-      - "3000:80"  # Exposed for initial setup, route through NPM after
     volumes:
       - pocketid_data:/app/backend/data
     environment:
@@ -151,8 +171,8 @@ services:
 # Volumes
 # =============================================================================
 volumes:
-  npm_data:
-  npm_letsencrypt:
+  letsencrypt_certs:
+  certbot_webroot:
   pocketid_data:
   netbird_management:
 
