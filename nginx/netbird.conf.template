@@ -31,7 +31,7 @@ upstream relay {
 }
 
 upstream pocketid {
-    server pocketid:80;
+    server pocketid:1411;
 }
 
 # HTTP -> HTTPS redirect for NetBird domain
