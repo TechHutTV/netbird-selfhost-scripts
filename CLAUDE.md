@@ -69,17 +69,7 @@ sudo ufw allow 3478/udp comment 'NetBird - Coturn STUN/TURN'
 sudo ufw allow 33080/udp comment 'NetBird - Relay QUIC'
 ```
 
-#### Step 4: Allow Coturn UDP Port Range (Optional but Recommended)
-
-Coturn uses ephemeral ports for TURN relay. By default, these are in the range 49152-65535:
-
-```bash
-sudo ufw allow 49152:65535/udp comment 'NetBird - Coturn relay ports'
-```
-
-**Note:** You can customize this range in `turnserver.conf` using `min-port` and `max-port` to reduce the number of open ports.
-
-#### Step 5: Verify Configuration
+#### Step 4: Verify Configuration
 
 ```bash
 sudo ufw status verbose
@@ -97,10 +87,9 @@ OpenSSH                    ALLOW       Anywhere
 33080/tcp                  ALLOW       Anywhere                   # NetBird - Relay WebSocket
 3478/udp                   ALLOW       Anywhere                   # NetBird - Coturn STUN/TURN
 33080/udp                  ALLOW       Anywhere                   # NetBird - Relay QUIC
-49152:65535/udp            ALLOW       Anywhere                   # NetBird - Coturn relay ports
 ```
 
-#### Step 6: Reload UFW (if needed)
+#### Step 5: Reload UFW (if needed)
 
 ```bash
 sudo ufw reload
@@ -118,7 +107,6 @@ sudo ufw allow 10000/tcp && \
 sudo ufw allow 33080/tcp && \
 sudo ufw allow 3478/udp && \
 sudo ufw allow 33080/udp && \
-sudo ufw allow 49152:65535/udp && \
 sudo ufw --force enable && \
 sudo ufw status
 ```
@@ -126,7 +114,7 @@ sudo ufw status
 #### Troubleshooting UFW Issues
 
 - **Locked out of SSH?** Use cloud provider console to disable UFW or add SSH rule
-- **Coturn not working?** Ensure UDP 3478 and the relay port range are open
+- **Coturn not working?** Ensure UDP 3478 is open
 - **Peers can't connect?** Verify both TCP and UDP on port 33080 are allowed
 - **Let's Encrypt failing?** Confirm port 80/tcp is open and not blocked by cloud firewall
 
@@ -301,7 +289,7 @@ netbird-selfhost-scripts/
 ### QUIC/UDP Relay
 - Cannot be proxied through HTTP reverse proxies
 - Coturn handles UDP directly on host network
-- Port 3478 (STUN/TURN) and 49152-65535 (relay) must be open
+- Port 3478 (STUN/TURN) must be open
 
 ### Browser Client Support (v0.59.0+)
 - Requires WebSocket proxy endpoints:
